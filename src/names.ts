@@ -113,7 +113,8 @@ export class NameIndex {
     if (!row) return;
     const locks = this.locks.get(id)?.get(field) ?? [];
     if (locks.length) {
-      const lock = [...locks].sort((a, b) => (b.at as number) - (a.at as number))[0];
+      // The latest (in the same millisecond: the one added last).
+      const lock = locks.reduce((a, b) => ((b.at as number) >= (a.at as number) ? b : a));
       await cs.set(kind, id, field, lock.value);
       return;
     }

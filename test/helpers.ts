@@ -38,6 +38,7 @@ export function directory() {
     kept,
     get: (p: string) => call("GET", p),
     post: (p: string, b?: unknown, admin = true) => call("POST", p, b, admin),
+    del: (p: string, admin = true) => call("DELETE", p, undefined, admin),
     share: (o: Observation) => call("POST", "/observations", o, false),
   };
 }

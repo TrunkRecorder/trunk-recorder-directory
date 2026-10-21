@@ -11,8 +11,12 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.ts",
-    "deploy": "vite build && wrangler deploy",
-    "db:migrate": "wrangler d1 migrations apply directory --remote"
+    "test:local": "node scripts/e2e.ts local",
+    "test:staging": "node scripts/e2e.ts staging",
+    "test:production": "node scripts/e2e.ts production",
+    "check": "npm run typecheck && npm test && npm run test:local",
+    "deploy:staging": "node scripts/deploy.ts staging",
+    "deploy:production": "node scripts/deploy.ts production"
   },
   "dependencies": {
     "h3-js": "^4.5.0"

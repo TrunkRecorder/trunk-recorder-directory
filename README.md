@@ -51,13 +51,28 @@ It lives on a path of trunkrecorder.pro. The landing page stays its own static s
 
 ```bash
 npm install
-npm test            # the API end to end on in-memory SQLite
-npm run build       # the website
-npm run dev:api     # http://localhost:8790/directory/ on SQLite (directory.db)
+npm run dev:api        # http://localhost:8790/directory/ on SQLite (directory.db)
 node scripts/seed.ts   # a few sample shares into it
 ```
 
 `npm run dev` rebuilds the site as it changes and serves both.
+
+## Testing
+
+Three levels, all in the repo:
+
+| | What | Where it runs |
+|---|---|---|
+| `npm test` | Unit and API tests (`test/*.test.ts`): shares, matching, claims, names, change sets, merges, reverts, reading, search, the API's surface, the Worker's routing | In memory (SQLite), seconds |
+| `npm run test:local` | The end-to-end tests (`test/e2e/`) over HTTP against **the real Worker offline**: `wrangler dev` (workerd) with local D1 and R2 on a fresh database, the website built, writes included; run twice on one database | Offline, before deploying |
+| `npm run test:staging` | The same, against the staging Worker on workers.dev (its own D1 and R2), writes included | Deployed |
+| `npm run test:production` | The same, against trunkrecorder.pro, **reading only** (and the landing page still the landing page) | Deployed |
+
+`npm run check` runs the first two. CI runs both on every push. The Production workflow runs
+`test:production` every 6 hours.
+
+End-to-end writes use made-up identities (a random WACN) and hide what they made, so they can run again
+and again against one database.
 
 ## The API
 
@@ -80,17 +95,27 @@ and is rate-limited. Stewards' and admins' actions need `ADMIN_TOKEN` (bearer) u
 
 ## Deploying
 
-The Worker's route is `trunkrecorder.pro/directory*` (wrangler.toml). The first time:
-
 ```bash
-npx wrangler d1 create directory              # put its id in wrangler.toml
-npx wrangler r2 bucket create trp-directory-observations
-npx wrangler secret put ADMIN_TOKEN
-npm run db:migrate
-npm run deploy
+npm run deploy:staging       # checks, then staging; then its end-to-end tests (writes included)
+npm run deploy:production    # checks and staging's end-to-end tests, then production; then its tests (reading only)
 ```
 
-Then check that `/directory` reaches this Worker, not the site's custom-domain Worker.
+`scripts/deploy.ts`:
+1. Runs the checks first: typecheck, tests, the site's build.
+2. Makes the D1 database and R2 bucket if they're missing, and records the database ID in `wrangler.toml`.
+3. Applies the migrations, then deploys.
+4. Makes the `ADMIN_TOKEN` the first time.
+5. Tests what it deployed.
+
+URLs and admin tokens are kept in `.deploy.env` (not committed).
+
+| | Worker | D1 | R2 |
+|---|---|---|---|
+| production | `trunk-recorder-directory` on the route `trunkrecorder.pro/directory*` | `directory` | `trp-directory-observations` |
+| staging | `trunk-recorder-directory-staging` on workers.dev | `directory-staging` | `trp-directory-observations-staging` |
+
+The landing page (trunkrecorder.pro, a custom-domain Worker) is untouched. The route on `/directory*` takes those
+paths, and `test:production` checks that both are right.
 
 ## License
 

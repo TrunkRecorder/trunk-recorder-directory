@@ -67,6 +67,22 @@ async function claim(cs: ChangeSet, claims: ClaimKeys[], kind: string, recordId:
 
 const identityOf = (s: ObservedSite): SiteIdentity => ({ ...(s.expect ?? {}), ...Object.fromEntries(Object.entries(s.heard?.identity ?? {}).filter(([, v]) => v != null)) });
 
+/**
+ * A site found only by a weak claim (its control channel, nearby) is taken
+ * only if nothing says it's another: its system shown (not hidden, retired or
+ * merged away), and no identity that disagrees (WACN, System ID; RFSS and site).
+ */
+async function weakMatchHolds(cs: ChangeSet, siteId: string, id: SiteIdentity): Promise<boolean> {
+  const site = await cs.get("site", siteId);
+  if (!site || site.status === "merged" || site.status === "retired") return false;
+  const sys = await cs.get("system", await resolve(cs.db, site.system_id as string));
+  if (!sys || sys.status !== "active") return false;
+  const differs = (a: unknown, b: unknown) => a != null && b != null && a !== b;
+  if (differs(sys.wacn, id.wacn) || differs(sys.sys_id, id.sysId)) return false;
+  if (differs(site.rfss, id.rfss) || differs(site.site, id.site)) return false;
+  return true;
+}
+
 /** Which system a share is of: by its directory link, its sites' claims, then its identity; and others found to be it. */
 async function findSystem(cs: ChangeSet, obs: Observation, region: string | null, ids: SiteIdentity[]) {
   // ── which system ──
@@ -93,8 +109,12 @@ async function findSystem(cs: ChangeSet, obs: Observation, region: string | null
       if (await cs.get("site", id)) [found, strong] = [id, true];
     }
     if (!found) {
-      const hit = (await lookupClaims(cs, siteClaims(type, ids[i], s.controlChannelsHz, region), "site"))[0];
-      [found, strong] = [hit?.id ?? null, hit?.strong ?? false];
+      for (const hit of await lookupClaims(cs, siteClaims(type, ids[i], s.controlChannelsHz, region), "site")) {
+        if (hit.strong || (await weakMatchHolds(cs, hit.id, ids[i]))) {
+          [found, strong] = [hit.id, hit.strong];
+          break;
+        }
+      }
     }
     siteMatch.push(found);
     siteStrong.push(strong);

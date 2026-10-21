@@ -1,0 +1,17 @@
+# The deployed directory, read only: is trunkrecorder.pro/directory up and
+# answering as it should (and the landing page still the landing page)?
+name: Production
+on:
+  schedule: [{ cron: "17 */6 * * *" }]
+  workflow_dispatch:
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: npm run test:production
+        env:
+          PRODUCTION_URL: https://trunkrecorder.pro

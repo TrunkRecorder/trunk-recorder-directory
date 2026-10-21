@@ -27,7 +27,7 @@ run_worker_first = true
 [[d1_databases]]
 binding = "DB"
 database_name = "directory"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "d7aca0e0-faed-4cf3-b525-fafacc20bfb7"
 migrations_dir = "migrations"
 
 # Every share, as it came (the audit trail): `wrangler r2 bucket create trp-directory-observations`.
@@ -45,3 +45,32 @@ namespace_id = "1002"
 
 # ADMIN_TOKEN (a secret: `wrangler secret put ADMIN_TOKEN`) authorises the
 # steward/admin endpoints until there are accounts.
+
+# ── staging: its own Worker on workers.dev, its own D1 and R2, for testing
+# writes end to end (npm run test:staging). Bindings aren't inherited.
+[env.staging]
+name = "trunk-recorder-directory-staging"
+workers_dev = true
+routes = []
+
+[env.staging.assets]
+directory = "dist"
+binding = "ASSETS"
+run_worker_first = true
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "directory-staging"
+database_id = "fb605799-2982-40b4-b340-b3353be67459"
+migrations_dir = "migrations"
+
+[[env.staging.r2_buckets]]
+binding = "OBSERVATIONS"
+bucket_name = "trp-directory-observations-staging"
+
+[[env.staging.ratelimits]]
+name = "SHARE_LIMIT"
+namespace_id = "1003"
+  [env.staging.ratelimits.simple]
+  limit = 200
+  period = 60

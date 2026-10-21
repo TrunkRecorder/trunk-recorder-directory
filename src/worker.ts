@@ -37,8 +37,8 @@ export default {
     }
     if (!url.pathname.startsWith("/directory/")) return new Response("Not found", { status: 404 });
     const res = await env.ASSETS.fetch(req);
-    // A route of the app, not a file: the app.
-    if (res.status === 404 && !/\.[a-z0-9]+$/i.test(url.pathname)) return env.ASSETS.fetch(new Request(`${url.origin}/directory/index.html`, req));
+    // A route of the app, not a file: the app. (As /directory/: assets redirect index.html to it.)
+    if (res.status === 404 && !/\.[a-z0-9]+$/i.test(url.pathname)) return env.ASSETS.fetch(new Request(`${url.origin}/directory/`, req));
     return res;
   },
 };
