@@ -135,6 +135,45 @@ describe("the API, reading", () => {
   });
 });
 
+// Real licenses: the same answers offline (the fixture is real rows), on staging and on production.
+describe("the FCC lookup (/api/v1/fcc)", () => {
+  const FCC = `${BASE}/api/v1/fcc`;
+  const post = (path: string, body: unknown) => fetch(`${FCC}/${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body) });
+
+  test("identify: DC Fire and EMS, WMATA and Arlington County near DC, nearest first", async () => {
+    const r = await post("identify", { lat: 38.9, lon: -77.03, radiusM: 50_000, signals: [{ freqHz: 857_987_500 }, { freqHz: 489_087_500 }, { freqHz: 860_437_500 }] });
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get("access-control-allow-origin"), "*");
+    const j = (await r.json()) as any;
+    assert.deepEqual(j.query, { lat: 38.9, lon: -77.03, radiusM: 50_000 });
+    assert.equal(j.results[0].licenses[0].callSign, "WPXT459");
+    assert.equal(j.results[0].licenses[0].licensee, "DISTRICT OF COLUMBIA");
+    assert.equal(j.results[1].licenses[0].licensee, "Washington Metropolitan Area Transit Authority");
+    assert.equal(j.results[2].licenses[0].callSign, "KNIQ704");
+    for (const res of j.results) {
+      const d = res.licenses.map((l: any) => l.distanceM);
+      assert.deepEqual(d, [...d].sort((a: number, b: number) => a - b));
+      assert.equal(new Set(res.licenses.map((l: any) => l.callSign)).size, res.licenses.length, "each call sign once");
+    }
+  });
+
+  test("call signs heard on the air, named without a location", async () => {
+    const j = (await (await post("callsigns", { callSigns: ["KNJA391", "knje616", "ZZ9ZZZZ"] })).json()) as any;
+    assert.deepEqual(j.results.map((r: any) => [r.callSign, r.licensee]).sort(), [["KNJA391", "DISTRICT OF COLUMBIA"], ["KNJE616", "DISTRICT OF COLUMBIA"]]);
+  });
+
+  test("meta, errors and methods", async () => {
+    const m = (await (await fetch(`${FCC}/meta`)).json()) as any;
+    assert.equal(m.v, 1);
+    assert.ok(m.transmitters > 0 && m.dataDate);
+    assert.equal((await post("identify", { lat: 99, lon: 0, signals: [{ freqHz: 1 }] })).status, 400);
+    assert.equal((await post("identify", "{")).status, 400);
+    assert.equal((await fetch(`${FCC}/identify`)).status, 405);
+    assert.equal((await fetch(`${FCC}/nothing`)).status, 404);
+    assert.equal((await fetch(`${FCC}/identify`, { method: "OPTIONS" })).status, 204);
+  });
+});
+
 describe("the API, writing", { skip: !WRITE && "E2E_WRITE isn't set (read-only run)" }, () => {
   const made = new Set<string>();
   const actors = new Set<string>();

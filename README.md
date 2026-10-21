@@ -26,9 +26,14 @@ add a system to Trunk Recorder Pro from it.
 
 The design, and what isn't built yet, is in [docs/design.md](docs/design.md).
 
-It lives on a path of trunkrecorder.pro. The landing page stays its own static site
-([trunk-recorder-pro-site](https://github.com/TrunkRecorder/trunk-recorder-pro-site)), and the FCC license lookup stays at
-`/api/v1/fcc` (trp-api).
+It lives on paths of trunkrecorder.pro:
+- **`/directory*`:** the directory and its API (`/directory/api/v1`).
+- **`/api/v1/fcc/*`:** Trunk Recorder Pro's FCC license lookup, `src/fcc/`.
+  - It reads ArgusRF's FCC database (D1 `argus`, read only), which
+    [robotastic/argusrf](https://github.com/robotastic/argusrf) builds.
+  - Its query code and schema are a marked copy of ArgusRF's: copy them again if ArgusRF changes them.
+
+The landing page stays its own static site ([trunk-recorder-pro-site](https://github.com/TrunkRecorder/trunk-recorder-pro-site)).
 
 ## Layout
 
@@ -93,6 +98,14 @@ and is rate-limited. Stewards' and admins' actions need `ADMIN_TOKEN` (bearer) u
 | `POST /merges {a, b, why}`, `GET /merge-proposals`, `POST /merge-proposals/{id}/reject` | Merging (token) |
 | `POST /locks {id, field, value, reason}`, `POST /quarantine {actor, reason}`, `POST /systems/{id}/hide` | Moderation (token) |
 
+The FCC lookup, on `trunkrecorder.pro/api/v1/fcc`. It's open, CORS `*`, 30 lookups a minute per IP, and request bodies are never logged:
+
+| | |
+|---|---|
+| `POST /api/v1/fcc/identify {lat, lon, radiusM?, signals: [{freqHz, widthHz?}]}` | Who is licensed on each frequency near the point (up to 64; 1–150 km), nearest first, each call sign once; `historical` when only lapsed licenses match |
+| `POST /api/v1/fcc/callsigns {callSigns: [...]}` | Who holds each active call sign (up to 64), with no location |
+| `GET /api/v1/fcc/meta` | The FCC data's date |
+
 ## Deploying
 
 ```bash
@@ -111,8 +124,8 @@ URLs and admin tokens are kept in `.deploy.env` (not committed).
 
 | | Worker | D1 | R2 |
 |---|---|---|---|
-| production | `trunk-recorder-directory` on the route `trunkrecorder.pro/directory*` | `directory` | `trp-directory-observations` |
-| staging | `trunk-recorder-directory-staging` on workers.dev | `directory-staging` | `trp-directory-observations-staging` |
+| production | `trunk-recorder-directory` on the routes `trunkrecorder.pro/directory*` and `trunkrecorder.pro/api/v1/fcc/*` | `directory` (and `argus`, read only) | `trp-directory-observations` |
+| staging | `trunk-recorder-directory-staging` on workers.dev | `directory-staging` (and `argus`, read only) | `trp-directory-observations-staging` |
 
 The landing page (trunkrecorder.pro, a custom-domain Worker) is untouched. The route on `/directory*` takes those
 paths, and `test:production` checks that both are right.

@@ -4,12 +4,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import worker, { type Env } from "../src/worker.ts";
-import { sqlite } from "../src/sqlite.ts";
+import type { Db } from "../src/db.ts";
+import { fccSqlite, sqlite } from "../src/sqlite.ts";
 import { obs, p25Site, recorder, TOKEN } from "./helpers.ts";
 
 /** D1's prepare/bind/all/batch, on SQLite. */
-function fakeD1() {
-  const db = sqlite();
+function fakeD1(db: Db = sqlite()) {
   const stmt = (sql: string, params: unknown[] = []): any => ({
     sql,
     params,
@@ -39,6 +39,8 @@ function env(over: Partial<Env> = {}) {
     } as unknown as Fetcher,
     SHARE_LIMIT: { limit: async () => ({ success: allowed }) } as unknown as RateLimit,
     ADMIN_TOKEN: TOKEN,
+    FCC_DB: fakeD1(fccSqlite()).d1,
+    FCC_LIMIT: { limit: async () => ({ success: allowed }) } as unknown as RateLimit,
     ...over,
   };
   return { e, put, block: () => (allowed = false) };
@@ -92,4 +94,30 @@ test("an unexpected failure is a JSON 500, not a crash", async () => {
   const r = await get(e, "/directory/api/v1/meta");
   assert.equal(r.status, 500);
   assert.equal(((await r.json()) as any).error, "D1 is down");
+});
+
+test("/api/v1/fcc/* is the FCC lookup, on ArgusRF's database: identify, call signs, meta", async () => {
+  const { e } = env();
+  const id = await get(e, "/api/v1/fcc/identify", { method: "POST", body: JSON.stringify({ lat: 38.9, lon: -77.03, signals: [{ freqHz: 857_987_500 }] }) });
+  assert.equal(id.status, 200);
+  assert.equal(((await id.json()) as any).results[0].licenses[0].callSign, "WPXT459");
+  const cs = await get(e, "/api/v1/fcc/callsigns", { method: "POST", body: JSON.stringify({ callSigns: ["KNJA391"] }) });
+  assert.equal(((await cs.json()) as any).results[0].licensee, "DISTRICT OF COLUMBIA");
+  assert.equal((await get(e, "/api/v1/fcc/meta")).status, 200);
+  assert.equal((await get(e, "/api/v1/fcc/nothing")).status, 404);
+  assert.equal((await get(e, "/api/v1/other")).status, 404, "only /api/v1/fcc/ is this Worker's");
+});
+
+test("FCC lookups past the rate limit are 429s; its meta isn't limited", async () => {
+  const { e, block } = env();
+  block();
+  assert.equal((await get(e, "/api/v1/fcc/identify", { method: "POST", body: "{}" })).status, 429);
+  assert.equal((await get(e, "/api/v1/fcc/meta")).status, 200);
+});
+
+test("an FCC database failure is a JSON 500", async () => {
+  const { e } = env({ FCC_DB: { prepare: () => { throw new Error("argus is down"); }, batch: async () => {} } as unknown as D1Database });
+  const r = await get(e, "/api/v1/fcc/meta");
+  assert.equal(r.status, 500);
+  assert.equal(((await r.json()) as any).error, "argus is down");
 });

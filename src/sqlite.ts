@@ -8,6 +8,14 @@ import type { Db } from "./db.ts";
 
 const MIGRATIONS = join(import.meta.dirname, "..", "migrations");
 
+/** ArgusRF's FCC database for tests and local runs: the fixture (its schema, with real DC-area rows), or a built one at `path` (ArgusRF's build/spectrum.db). */
+export function fccSqlite(path?: string): Db & { raw: Database.Database } {
+  if (path) return wrap(new Database(path, { readonly: true }));
+  const raw = new Database(":memory:");
+  raw.exec(readFileSync(join(import.meta.dirname, "..", "test", "fixtures", "fcc.sql"), "utf8"));
+  return wrap(raw);
+}
+
 export function sqlite(path = ":memory:"): Db & { raw: Database.Database } {
   const raw = new Database(path);
   raw.pragma("journal_mode = WAL");
@@ -18,6 +26,10 @@ export function sqlite(path = ":memory:"): Db & { raw: Database.Database } {
     raw.exec(readFileSync(join(MIGRATIONS, f), "utf8"));
     raw.prepare("INSERT INTO d1_migrations (name) VALUES (?)").run(f);
   }
+  return wrap(raw);
+}
+
+function wrap(raw: Database.Database): Db & { raw: Database.Database } {
   const cache = new Map<string, Database.Statement>();
   const prep = (sql: string) => {
     let s = cache.get(sql);

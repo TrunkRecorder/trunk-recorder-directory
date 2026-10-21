@@ -2,9 +2,9 @@
 # (/directory/api/v1/…) and its website (the Vite build, under /directory/).
 #
 # It is routed on the path only: the landing page (trunkrecorder.pro) stays its
-# own static Worker (TrunkRecorder/trunk-recorder-pro-site), and the FCC lookup
-# (/api/v1/fcc/*) stays in trp-api (robotastic/argusrf). The route has to win over
-# the site's custom-domain Worker for /directory*; check that on the first deploy.
+# own static Worker (TrunkRecorder/trunk-recorder-pro-site). A second route takes
+# /api/v1/fcc/*: the FCC license lookup Trunk Recorder Pro asks (src/fcc/), over
+# ArgusRF's FCC database. Routes win over the site's custom domain for their paths.
 
 name = "trunk-recorder-directory"
 main = "src/worker.ts"
@@ -13,6 +13,7 @@ compatibility_flags = ["nodejs_compat"]
 
 routes = [
   { pattern = "trunkrecorder.pro/directory*", zone_name = "trunkrecorder.pro" },
+  { pattern = "trunkrecorder.pro/api/v1/fcc/*", zone_name = "trunkrecorder.pro" },
 ]
 
 # The website. Files are under dist/directory/ so their paths are the URL's;
@@ -43,6 +44,21 @@ namespace_id = "1002"
   limit = 20
   period = 60
 
+# ArgusRF's FCC ULS database (robotastic/argusrf builds and uploads it), read
+# only, for /api/v1/fcc/*. Its schema is copied in src/fcc/schema.sql.
+[[d1_databases]]
+binding = "FCC_DB"
+database_name = "argus"
+database_id = "2055819c-cf47-48e9-a9fe-265c1ef0cd03"
+
+# FCC lookups, per IP.
+[[ratelimits]]
+name = "FCC_LIMIT"
+namespace_id = "1004"
+  [ratelimits.simple]
+  limit = 30
+  period = 60
+
 # ADMIN_TOKEN (a secret: `wrangler secret put ADMIN_TOKEN`) authorises the
 # steward/admin endpoints until there are accounts.
 
@@ -71,6 +87,19 @@ bucket_name = "trp-directory-observations-staging"
 [[env.staging.ratelimits]]
 name = "SHARE_LIMIT"
 namespace_id = "1003"
+  [env.staging.ratelimits.simple]
+  limit = 200
+  period = 60
+
+# The same FCC database, read only (staging tests read real licenses).
+[[env.staging.d1_databases]]
+binding = "FCC_DB"
+database_name = "argus"
+database_id = "2055819c-cf47-48e9-a9fe-265c1ef0cd03"
+
+[[env.staging.ratelimits]]
+name = "FCC_LIMIT"
+namespace_id = "1005"
   [env.staging.ratelimits.simple]
   limit = 200
   period = 60

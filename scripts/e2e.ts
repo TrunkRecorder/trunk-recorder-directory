@@ -47,6 +47,11 @@ async function local(): Promise<number> {
       console.error("migrating the local D1 failed");
       return 1;
     }
+    // The FCC lookup's database: ArgusRF's schema with the fixture's real rows.
+    if ((await run("npx", ["wrangler", "d1", "execute", "argus", "--local", "--env", "staging", "--persist-to", state, "--file", "test/fixtures/fcc.sql"], {}, true)) !== 0) {
+      console.error("loading the FCC fixture into the local D1 failed");
+      return 1;
+    }
     const dev = spawn("npx", ["wrangler", "dev", "--env", "staging", "--local", "--ip", "127.0.0.1", "--port", String(port), "--persist-to", state, "--var", `ADMIN_TOKEN:${token}`, "--show-interactive-dev-session=false"], {
       cwd: ROOT,
       stdio: ["ignore", "pipe", "pipe"],

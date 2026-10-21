@@ -9,15 +9,26 @@ import { createServer } from "node:http";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join, extname } from "node:path";
 import { BASE, handle } from "./api.ts";
-import { sqlite } from "./sqlite.ts";
+import { FCC_BASE, handleFcc } from "./fcc/api.ts";
+import { fccSqlite, sqlite } from "./sqlite.ts";
 
 const PORT = Number(process.env.PORT ?? 8790);
 const ROOT = join(import.meta.dirname, "..");
 const db = sqlite(process.env.DB_PATH ?? join(ROOT, "directory.db"));
+// The FCC lookup: ArgusRF's built database (FCC_DB_PATH=…/argusrf/build/spectrum.db), else the fixture.
+const fcc = fccSqlite(process.env.FCC_DB_PATH);
 const TYPES: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png", ".ico": "image/x-icon" };
 
 createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+  if (url.pathname.startsWith(`${FCC_BASE}/`)) {
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    const r = (await handleFcc(fcc, new Request(url, { method: req.method, headers: req.headers as Record<string, string>, body: ["GET", "HEAD"].includes(req.method ?? "GET") ? undefined : Buffer.concat(chunks) }))) ?? new Response('{"error":"not found"}', { status: 404 });
+    res.writeHead(r.status, Object.fromEntries(r.headers));
+    res.end(Buffer.from(await r.arrayBuffer()));
+    return;
+  }
   if (url.pathname.startsWith(BASE)) {
     const chunks: Buffer[] = [];
     for await (const c of req) chunks.push(c as Buffer);
