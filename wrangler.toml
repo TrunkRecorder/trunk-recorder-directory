@@ -1,0 +1,47 @@
+# trunkrecorder.pro/directory: one Worker for the directory's API
+# (/directory/api/v1/…) and its website (the Vite build, under /directory/).
+#
+# It is routed on the path only: the landing page (trunkrecorder.pro) stays its
+# own static Worker (TrunkRecorder/trunk-recorder-pro-site), and the FCC lookup
+# (/api/v1/fcc/*) stays in trp-api (robotastic/argusrf). The route has to win over
+# the site's custom-domain Worker for /directory*; check that on the first deploy.
+
+name = "trunk-recorder-directory"
+main = "src/worker.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+routes = [
+  { pattern = "trunkrecorder.pro/directory*", zone_name = "trunkrecorder.pro" },
+]
+
+# The website. Files are under dist/directory/ so their paths are the URL's;
+# the Worker runs first and falls back to the app's index.html for its routes.
+[assets]
+directory = "dist"
+binding = "ASSETS"
+run_worker_first = true
+
+# The records and their history. Create it with `wrangler d1 create directory`
+# and paste its id here; `npm run db:migrate` applies migrations/.
+[[d1_databases]]
+binding = "DB"
+database_name = "directory"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+# Every share, as it came (the audit trail): `wrangler r2 bucket create trp-directory-observations`.
+[[r2_buckets]]
+binding = "OBSERVATIONS"
+bucket_name = "trp-directory-observations"
+
+# Shares, per recorder ID and per IP.
+[[ratelimits]]
+name = "SHARE_LIMIT"
+namespace_id = "1002"
+  [ratelimits.simple]
+  limit = 20
+  period = 60
+
+# ADMIN_TOKEN (a secret: `wrangler secret put ADMIN_TOKEN`) authorises the
+# steward/admin endpoints until there are accounts.

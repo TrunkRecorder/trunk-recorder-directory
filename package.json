@@ -1,0 +1,40 @@
+{
+  "name": "trunk-recorder-directory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "trunkrecorder.pro/directory: radio systems shared by Trunk Recorder Pro users.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite build --watch & node src/dev.ts",
+    "dev:api": "node src/dev.ts",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts",
+    "deploy": "vite build && wrangler deploy",
+    "db:migrate": "wrangler d1 migrations apply directory --remote"
+  },
+  "dependencies": {
+    "h3-js": "^4.5.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261021.1",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^24.19.2",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "better-sqlite3": "^12.11.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.5",
+    "wrangler": "^4.151.3"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true,
+    "workerd@1.20261019.1": true
+  }
+}
