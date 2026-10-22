@@ -131,7 +131,11 @@ fieldset { border: 0; margin: 0; padding: 0; }
 .maplibregl-ctrl-attrib { background: color-mix(in srgb, var(--panel) 85%, transparent) !important; color: var(--muted); }
 .maplibregl-ctrl-attrib a { color: var(--muted) !important; }
 
+.where { display: grid; grid-template-columns: minmax(260px, 1.2fr) 1fr; gap: 16px; align-items: start; }
+.where-map { height: 280px; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+
 @media (max-width: 760px) {
+  .where { grid-template-columns: 1fr; }
   .brand-name { display: none; }
   .split { grid-template-columns: 1fr; grid-template-rows: 45vh auto; height: auto; }
   .split-map { order: -1; height: 45vh; }

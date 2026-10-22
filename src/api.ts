@@ -11,7 +11,7 @@ import { keeper, mergeSystems } from "./merge.ts";
 import { NameIndex } from "./names.ts";
 import { Invalid, parseObservation } from "./observation.ts";
 import { changeset, diff, getSystem, getTalkgroups, history, near, search, talkgroupsCsv, trpSystem } from "./read.ts";
-import { city, county, countyCounts, LICENSED_MAX_DEG, licensed, mapSites, nearby, parseTypes, placesNamed, state, states } from "./explore.ts";
+import { city, county, countyCounts, LICENSED_MAX_DEG, licensed, mapSites, nearby, parseTypes, placesNamed, state, states, where } from "./explore.ts";
 import { cellCenter, validCell } from "./geo.ts";
 import { placeSystem } from "./place.ts";
 import type { Places } from "./places.ts";
@@ -117,6 +117,8 @@ export async function handle(env: Env, req: Request): Promise<Response> {
         const tgs = (await getTalkgroups(db, id, { sites }))!.filter((t) => t.alpha || q.get("all") === "1");
         return json({ system: trpSystem(s, sites), talkgroupsCsv: talkgroupsCsv(tgs) }, 200, { etag: `"${s.id}.${s.rev}"` });
       }
+      r = m(/^\/systems\/(sys_[0-9a-z]+)\/where$/);
+      if (r) return json(await where(db, await resolve(db, r[1])));
       r = m(/^\/systems\/(sys_[0-9a-z]+)\/history$/);
       if (r) return json({ history: await history(db, await resolve(db, r[1]), { before: num(q.get("before")) }) });
       r = m(/^\/systems\/(sys_[0-9a-z]+)\/diff$/);

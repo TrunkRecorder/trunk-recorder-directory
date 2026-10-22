@@ -303,3 +303,24 @@ export async function placesNamed(db: Db, q: string, limit = 10) {
   );
   return rows.map((r) => ({ geoid: r.geoid as string, kind: r.kind as string, state: r.state as string, name: r.full_name as string, transmitters: r.n as number, county: (r.county as string) ?? null }));
 }
+
+/** Where a system is: its sites' licensed transmitters (and the places they're in), and how placing each site went. */
+export async function where(db: Db, systemId: string) {
+  const tx = await db.all<Row>(
+    `SELECT x.site_id, x.call_sign, x.licensee, x.lat, x.lon, x.height_m, x.erp_w, x.freq_hz, x.state, x.county, x.place,
+            c.full_name AS county_name, p.full_name AS place_name
+       FROM site_transmitters x JOIN sites s ON s.id = x.site_id
+       LEFT JOIN places c ON c.geoid = x.county LEFT JOIN places p ON p.geoid = x.place
+      WHERE s.system_id = ? AND s.status IN ('heard', 'announced') ORDER BY x.site_id, x.lat`,
+    [systemId],
+  );
+  const placements = await db.all<Row>("SELECT p.site_id, p.method, p.note, p.at FROM placements p JOIN sites s ON s.id = p.site_id WHERE s.system_id = ?", [systemId]);
+  return {
+    transmitters: tx.map((t) => ({
+      site: t.site_id as string, callSign: t.call_sign as string, licensee: t.licensee as string, lat: t.lat as number, lon: t.lon as number,
+      heightM: t.height_m as number | null, erpW: t.erp_w as number | null, freqHz: t.freq_hz as number | null,
+      state: t.state as string, county: t.county as string, countyName: (t.county_name as string) ?? "", place: t.place as string, placeName: (t.place_name as string) ?? "",
+    })),
+    placements: placements.map((p) => ({ site: p.site_id as string, method: p.method as string, note: p.note as string, at: p.at as number })),
+  };
+}

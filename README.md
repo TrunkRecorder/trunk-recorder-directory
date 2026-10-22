@@ -19,6 +19,10 @@ add a system to Trunk Recorder Pro from it.
   - any version can be viewed or compared;
   - a change set, a system's history back to a version, or everything one recorder did can be reverted (merges
     included).
+- **Where systems are comes from their licenses:** each site's transmitters are the FCC-licensed base and repeater
+  stations on its frequencies, found by the call signs it sends on the air, or by its frequencies when it sends none.
+  Census boundaries put each one in a state, county and city, so the directory can be browsed by place, mapped, and
+  asked "what can I hear from here?" (with a rough reception estimate from each transmitter's power and height).
 - **Partial views add up:**
   - a share is matched site first, so recorders hearing different sites of a statewide system build one system;
   - two records found to be one system (by their identity, or by one announcing the other's site) are merged, and
@@ -29,8 +33,9 @@ The design, and what isn't built yet, is in [docs/design.md](docs/design.md).
 It lives on paths of trunkrecorder.pro:
 - **`/directory*`:** the directory and its API (`/directory/api/v1`).
 - **`/api/v1/fcc/*`:** Trunk Recorder Pro's FCC license lookup, `src/fcc/`.
-  - It reads ArgusRF's FCC database (D1 `argus`, read only), which
-    [robotastic/argusrf](https://github.com/robotastic/argusrf) builds.
+  - It reads ArgusRF's FCC database (D1 `argus-YYYYMMDD`, a new one each FCC refresh; read only), which
+    [robotastic/argusrf](https://github.com/robotastic/argusrf) builds. Placing sites reads it too. After a
+    refresh, point `FCC_DB` (both environments, `wrangler.toml`) at the new one and deploy.
   - Its query code and schema are a marked copy of ArgusRF's: copy them again if ArgusRF changes them.
 
 The landing page stays its own static site ([trunk-recorder-pro-site](https://github.com/TrunkRecorder/trunk-recorder-pro-site)).
@@ -48,9 +53,13 @@ The landing page stays its own static site ([trunk-recorder-pro-site](https://gi
 | `src/store.ts` | Change sets and revisions: every write goes through one |
 | `src/merge.ts`, `src/revert.ts` | Merging two systems; undoing change sets |
 | `src/read.ts` | A system as it is or was, talkgroups, near a place, search, history, diffs, TRP's config |
+| `src/place.ts`, `src/places.ts` | Placing sites from FCC licenses; which county and city a point is in |
+| `src/explore.ts` | By place (state → county → city), the map's layers, near a point, licensed systems not shared yet |
+| `src/tiles.ts` | The basemap: vector tiles from one PMTiles file in R2; uploading it |
 | `src/geo.ts` | H3 cells (D1 has no spatial index) |
 | `migrations/` | The D1 schema |
-| `web/` | The website (React, Vite), built into `dist/directory/` |
+| `web/` | The website (React, Vite, MapLibre), built into `dist/directory/` |
+| `scripts/geo.ts`, `scripts/maps.ts` | The map's data: Census boundaries and places; fonts; the basemap's extract and upload |
 
 ## Developing
 
@@ -81,7 +90,7 @@ and again against one database.
 
 ## The API
 
-All under `/directory/api/v1`. Reads are open. A share needs no account: it carries the install's anonymous recorder ID,
+All under `/directory/api/v1`. The exploring reads take `types=p25,smartnet,…` (default: every type). Reads are open. A share needs no account: it carries the install's anonymous recorder ID,
 and is rate-limited. Stewards' and admins' actions need `ADMIN_TOKEN` (bearer) until there are accounts.
 
 | | |
@@ -91,7 +100,11 @@ and is rate-limited. Stewards' and admins' actions need `ADMIN_TOKEN` (bearer) u
 | `GET /systems/{id}/talkgroups[.csv][?rev=&sites=]` | Its talkgroups, with where each is heard and the other names people gave; `sites=`: what's heard there |
 | `GET /systems/{id}/config[?sites=]` | Ready for TRP: its `System` (with `directory: {id, rev}`) and talkgroup CSV |
 | `GET /systems/{id}/history`, `GET /systems/{id}/diff?from=&to=`, `GET /changesets/{id}` | Versions, a diff between two, one version's changes |
-| `GET /search?q=[&system=]` | By frequency (`857.9875`), call sign, identity (`BEE00.3A9`), talkgroup number in a system, or words |
+| `GET /search?q=[&system=&types=]` | By frequency (`857.9875`), call sign, identity (`BEE00.3A9`), talkgroup number in a system, or words (names, licensees); and `places` by name |
+| `GET /places`, `/places/{ST}`, `/places/{ST}/{county}`, `/places/{ST}/{county}/{place}` | By place: states with counts by type; a state's counties and regional systems; a county's systems and cities; a city's systems (Census GEOIDs) |
+| `GET /map/sites`, `GET /map/counties` | Every placed site with its transmitters; each county's count of systems |
+| `GET /map/licensed?bbox=w,s,e,n` | Trunked base stations licensed in a box (3° at most) whose call signs no shared system has |
+| `GET /nearby?lat=&lon=[&coarse=1]&radiusKm=` (or `cell=`) | Systems with a transmitter in range, nearest first, with their transmitters (power, height, frequency) |
 | `GET /identify?claim=p25:bee00.3a9/1.5` | What an identity heard on the air is |
 | `POST /observations` | A share from TRP (`src/observation.ts`) |
 | `POST /changesets/{id}/revert`, `POST /systems/{id}/revert {to}`, `POST /actors/{id}/revert` | Revert (token) |
@@ -113,6 +126,19 @@ npm run deploy:staging       # checks, then staging; then its end-to-end tests (
 npm run deploy:production    # checks and staging's end-to-end tests, then production; then its tests (reading only)
 ```
 
+### The map's data
+
+| | Made by | Kept in | Served from |
+|---|---|---|---|
+| Counties and Census places (2024 cartographic boundaries) and the `places` table | `node scripts/geo.ts` | `.cache/geo/out/` | the site's files (`/directory/geo/`), D1 |
+| Label fonts (Protomaps' Noto Sans glyphs) | `node scripts/maps.ts fonts` | `.cache/maps/fonts/` | the site's files (`/directory/fonts/`) |
+| The basemap: Protomaps' OpenStreetMap build, the US to zoom 12 (2.1 GB) | `node scripts/maps.ts extract` (needs `pmtiles`) | `.cache/maps/us.pmtiles` | R2 `trp-directory-maps` (`/directory/tiles/`), one bucket for both |
+
+The deploy script makes the boundaries and fonts if they're missing, and loads the `places` table when it changed.
+The basemap is uploaded on its own, rarely (a new extract): `node scripts/maps.ts tiles staging` (through the
+Worker, in 64 MB parts; staging and production read the same bucket). Without it the site still works; its maps
+have no basemap.
+
 `scripts/deploy.ts`:
 1. Runs the checks first: typecheck, tests, the site's build.
 2. Makes the D1 database and R2 bucket if they're missing, and records the database ID in `wrangler.toml`.
@@ -124,8 +150,8 @@ URLs and admin tokens are kept in `.deploy.env` (not committed).
 
 | | Worker | D1 | R2 |
 |---|---|---|---|
-| production | `trunk-recorder-directory` on the routes `trunkrecorder.pro/directory*` and `trunkrecorder.pro/api/v1/fcc/*` | `directory` (and `argus`, read only) | `trp-directory-observations` |
-| staging | `trunk-recorder-directory-staging` on workers.dev | `directory-staging` (and `argus`, read only) | `trp-directory-observations-staging` |
+| production | `trunk-recorder-directory` on the routes `trunkrecorder.pro/directory*` and `trunkrecorder.pro/api/v1/fcc/*` | `directory` (and `argus-20261018`, read only) | `trp-directory-observations`, `trp-directory-maps` |
+| staging | `trunk-recorder-directory-staging` on workers.dev | `directory-staging` (and `argus-20261018`, read only) | `trp-directory-observations-staging`, `trp-directory-maps` |
 
 The landing page (trunkrecorder.pro, a custom-domain Worker) is untouched. The route on `/directory*` takes those
 paths, and `test:production` checks that both are right.

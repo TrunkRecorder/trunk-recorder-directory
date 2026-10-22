@@ -104,3 +104,15 @@ test("search: by licensee, call sign and place name; filtered by type", async ()
   const places = (await d.get("/search?q=Arlington")).json.places;
   assert.ok(places.some((p: any) => p.geoid === "51013" && p.kind === "county"), JSON.stringify(places));
 });
+
+test("where a system is: its transmitters and the places they're in; an unplaced one says why", async () => {
+  const { d, dcfd } = await twoSystems();
+  const w = (await d.get(`/systems/${dcfd}/where`)).json;
+  assert.equal(w.transmitters.length, 10);
+  assert.ok(w.transmitters.every((t: any) => t.countyName === "District of Columbia" && t.placeName === "Washington city" && t.licensee === "DISTRICT OF COLUMBIA"));
+  assert.equal(w.placements[0].method, "call_sign");
+  const r = await d.share(obs(recorder(), [p25Site(1, 1, 851_000_000, { wacn: 0xbee55 })]));
+  const u = (await d.get(`/systems/${r.json.system}/where`)).json;
+  assert.equal(u.transmitters.length, 0);
+  assert.match(u.placements[0].note, /no license/);
+});

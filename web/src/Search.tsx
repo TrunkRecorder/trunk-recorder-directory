@@ -66,7 +66,8 @@ export function SearchPage(props: { query: URLSearchParams }) {
                   {hs[0].systemName || "Unnamed system"}
                 </Link>
                 <div className="muted small">
-                  {hs.slice(0, 3).map((h) => `${KIND[h.kind] ?? h.kind}: ${h.label}`).join(" · ")}
+                  {/* (A system's own hit is its name, licensee or call signs: the title says it.) */}
+                  {hs.filter((h) => h.kind !== "system").slice(0, 3).map((h) => `${KIND[h.kind] ?? h.kind}: ${h.label}`).join(" · ") || "Its name, licensee or call signs"}
                 </div>
               </li>
             ))}
