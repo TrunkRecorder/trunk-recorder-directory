@@ -19,7 +19,10 @@
     "deploy:production": "node scripts/deploy.ts production"
   },
   "dependencies": {
-    "h3-js": "^4.5.0"
+    "@protomaps/basemaps": "^5.7.2",
+    "h3-js": "^4.5.0",
+    "maplibre-gl": "^6.13.0",
+    "pmtiles": "^4.5.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261021.1",
@@ -29,6 +32,7 @@
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^4.7.0",
     "better-sqlite3": "^12.11.1",
+    "mapshaper": "^0.7.80",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "typescript": "^5.9.3",

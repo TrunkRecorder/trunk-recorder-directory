@@ -1,7 +1,7 @@
 // ArgusRF's FCC license lookup: which licensed transmitters are on a band near
 // a point, from its FCC ULS database (D1 `argus`, schema in schema.sql).
 //
-// COPIED from robotastic/argusrf at 856f4c9: shared/src/query.ts and the
+// COPIED from robotastic/argusrf at 03ea815: shared/src/query.ts and the
 // functions of shared/src/geo.ts it uses, unchanged but for this header and
 // the one import made local. ArgusRF owns the data and its schema; this copy
 // is how the directory's Worker reads it. If ArgusRF changes either, copy them
@@ -92,6 +92,8 @@ export interface TransmitterRow {
   frn: string | null;
   radio_service_code: string | null;
   radio_service_desc: string | null;
+  /** The FCC's station class, verbatim (FB2 a repeater, FB8 a centralized trunk relay, FX1 a control station, MO a mobile; a C suffix: interconnect, T: temporary). Null before the column existed. */
+  class_station_code: string | null;
   license_status: string | null;
   grant_date: string | null;
   expired_date: string | null;

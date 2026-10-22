@@ -203,8 +203,9 @@ export async function getTalkgroups(db: Db, id: string, opts: { rev?: number; si
   const ids = tgs.map((t) => t.id as string);
   const where = new Map<string, string[]>();
   const alts = new Map<string, { field: string; value: string; supporters: number }[]>();
-  for (let i = 0; i < ids.length; i += 90) {
-    const some = ids.slice(i, i + 90);
+  // (45 at a time: the first query binds them twice, under D1's 100 parameters.)
+  for (let i = 0; i < ids.length; i += 45) {
+    const some = ids.slice(i, i + 45);
     // (Including talkgroups merged into these: their heard sites are theirs.)
     for (const r of await db.all<{ tg: string; site_id: string }>(
       `SELECT COALESCE(t.merged_into, ts.talkgroup_id) AS tg, ts.site_id FROM talkgroup_sites ts JOIN talkgroups t ON t.id = ts.talkgroup_id
@@ -350,7 +351,8 @@ export async function search(db: Db, q: string, opts: { system?: string; limit?:
   if (!text) return [];
   const names = new Map<string, string>();
   const nameOf = async (id: string) => {
-    if (!names.has(id)) names.set(id, ((await first<Row>(db, "SELECT name FROM systems WHERE id = ?", [id]))?.name as string) ?? "");
+    // (Unnamed: who holds its licenses.)
+    if (!names.has(id)) names.set(id, ((await first<Row>(db, "SELECT COALESCE(NULLIF(y.name, ''), (SELECT x.licensee FROM site_transmitters x JOIN sites s ON s.id = x.site_id WHERE s.system_id = y.id AND x.licensee != '' LIMIT 1), '') AS name FROM systems y WHERE y.id = ?", [id]))?.name as string) ?? "");
     return names.get(id)!;
   };
   const hits: SearchHit[] = [];

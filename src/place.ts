@@ -1,0 +1,198 @@
+// Placing a system's sites from FCC licenses (ArgusRF's database): which
+// licensed base and repeater stations are each site's transmitters, where
+// they are, and so which state, county and city it's in.
+//
+// A site's frequencies (control channels, voice channels granted) are matched
+// against licensed transmitters (station class FB…: bases and repeaters, not
+// mobiles or control stations):
+//
+//   by call sign:  the licenses the system has (heard on the air, in a
+//                  config, looked up), on the site's frequencies;
+//   by fingerprint: with none of those, every base station licensed on one of
+//                  its control channels, scored by how many of its frequencies
+//                  are licensed at the same spot. A spot needs two or more.
+//
+// A license's spots on the frequencies within CLUSTER_KM of the best one are
+// the site's transmitters (a simulcast site has several). Two equally good
+// spots far apart (a channel reused across a state) are ambiguous: the site
+// isn't placed, and placements says why.
+
+import { type Db, type Row, insertRows, marks } from "./db.ts";
+import { distanceKm } from "./geo.ts";
+import type { Places } from "./places.ts";
+import { reindex } from "./share.ts";
+import { ChangeSet } from "./store.ts";
+
+const HALF_CHANNEL = 3125;
+const CLUSTER_KM = 60;
+/** Placed again after this long (licenses change), or when its frequencies do. */
+const REPLACE_MS = 30 * 24 * 3600_000;
+const MAX_FREQS = 40;
+
+export interface Transmitter {
+  callSign: string;
+  licensee: string;
+  lat: number;
+  lon: number;
+  heightM: number | null;
+  erpW: number | null;
+  freqHz: number;
+  stationClass: string;
+  /** How many of the site's frequencies are licensed here. */
+  score: number;
+  /** Whether a control channel of the site's is. */
+  control: boolean;
+}
+
+interface FccRow {
+  call_sign: string;
+  licensee_name: string | null;
+  freq_center_hz: number;
+  lat: number;
+  lon: number;
+  structure_height_m: number | null;
+  power_erp_w: number | null;
+  class_station_code: string | null;
+  location_state: string | null;
+}
+
+const COLS = "call_sign, licensee_name, freq_center_hz, lat, lon, structure_height_m, power_erp_w, class_station_code, location_state";
+const BASE = "class_station_code LIKE 'FB%' AND license_status = 'A'";
+
+/**
+ * The licensed spots that are a site's transmitters: from these FCC rows, each
+ * spot (a location; one tower can hold its channels under several call signs)
+ * scored by how many of the site's frequencies are licensed there, plus a half
+ * for a call sign the system has. A spot needs a control channel, and two of
+ * its frequencies (or one, by a call sign of the system's).
+ */
+export function choose(rows: FccRow[], control: number[], all: number[], known: Set<string>): { transmitters: (Transmitter & { state: string })[]; note: string } {
+  const which = (f: number, set: number[]) => set.find((x) => Math.abs(x - f) <= HALF_CHANNEL);
+  const spots = new Map<string, Transmitter & { state: string; freqs: Set<number>; calls: Map<string, number> }>();
+  for (const r of rows) {
+    const f = which(r.freq_center_hz, all);
+    if (f === undefined) continue;
+    const key = `${r.lat.toFixed(4)}|${r.lon.toFixed(4)}`;
+    let s = spots.get(key);
+    if (!s) {
+      s = { callSign: r.call_sign, licensee: r.licensee_name ?? "", lat: r.lat, lon: r.lon, heightM: null, erpW: null, freqHz: 0, stationClass: r.class_station_code ?? "", score: 0, control: false, state: r.location_state ?? "", freqs: new Set(), calls: new Map() };
+      spots.set(key, s);
+    }
+    s.freqs.add(f);
+    s.calls.set(r.call_sign, (s.calls.get(r.call_sign) ?? 0) + 1);
+    if (which(r.freq_center_hz, control) !== undefined && !s.control) [s.control, s.freqHz, s.stationClass] = [true, r.freq_center_hz, r.class_station_code ?? s.stationClass];
+    if (r.power_erp_w != null) s.erpW = Math.max(s.erpW ?? 0, r.power_erp_w);
+    if (r.structure_height_m != null) s.heightM = Math.max(s.heightM ?? 0, r.structure_height_m);
+  }
+  const ok = [...spots.values()]
+    .map((s) => {
+      const mineToo = [...s.calls.keys()].some((c) => known.has(c));
+      // Its call sign: the system's, else the one licensing the most of it here.
+      const call = [...s.calls.entries()].sort((a, b) => Number(known.has(b[0])) - Number(known.has(a[0])) || b[1] - a[1] || a[0].localeCompare(b[0]))[0][0];
+      const licensee = rows.find((r) => r.call_sign === call)?.licensee_name ?? s.licensee;
+      return { ...s, callSign: call, licensee, score: s.freqs.size + (mineToo ? 0.5 : 0), mineToo };
+    })
+    .filter((s) => s.control && (s.freqs.size >= 2 || s.mineToo));
+  if (!ok.length) return { transmitters: [], note: spots.size ? "no licensed spot has its control channel and enough of its frequencies" : "no license on its frequencies" };
+  ok.sort((a, b) => b.score - a.score || a.callSign.localeCompare(b.callSign));
+  const best = ok[0];
+  const rival = ok.find((s) => s.score === best.score && distanceKm([s.lat, s.lon], [best.lat, best.lon]) > CLUSTER_KM);
+  if (rival) return { transmitters: [], note: `ambiguous: ${best.callSign} and ${rival.callSign} license it ${Math.round(distanceKm([rival.lat, rival.lon], [best.lat, best.lon]))} km apart` };
+  // Its transmitters: the spots near the best that license nearly as much of it.
+  const mine = ok.filter((s) => s.score >= best.score - 1 && distanceKm([s.lat, s.lon], [best.lat, best.lon]) <= CLUSTER_KM);
+  return { transmitters: mine.map(({ freqs: _f, calls: _c, mineToo: _m, ...t }) => t), note: "" };
+}
+
+export interface PlaceResult {
+  placed: string[];
+  unplaced: { site: string; note: string }[];
+}
+
+/**
+ * Place system `systemId`'s sites (those not placed since their frequencies
+ * last changed, or long ago; `force`: all). Writes their transmitters, the
+ * sites' (and the system's) location, and licenses it found.
+ */
+export async function placeSystem(db: Db, fcc: Db, places: Places, systemId: string, opts: { now?: number; force?: boolean } = {}): Promise<PlaceResult> {
+  const now = opts.now ?? Date.now();
+  const out: PlaceResult = { placed: [], unplaced: [] };
+  const sites = await db.all<Row>("SELECT id, lat, lon FROM sites WHERE system_id = ? AND status IN ('heard', 'announced')", [systemId]);
+  if (!sites.length) return out;
+  const ids = sites.map((s) => s.id as string);
+  const freqRows = await db.all<{ site_id: string; freq_hz: number; use: string }>(`SELECT site_id, freq_hz, use FROM site_freqs WHERE site_id IN (${marks(ids.length)})`, ids);
+  const was = new Map((await db.all<Row>(`SELECT * FROM placements WHERE site_id IN (${marks(ids.length)})`, ids)).map((p) => [p.site_id as string, p]));
+  const licenses = await db.all<Row>("SELECT id, freq_hz, call_sign, name, source FROM fcc_licenses WHERE system_id = ?", [systemId]);
+  const callSigns = [...new Set(licenses.map((l) => l.call_sign as string))].slice(0, 50);
+  const byCall: FccRow[] = callSigns.length ? await fcc.all<FccRow>(`SELECT ${COLS} FROM transmitter WHERE call_sign IN (${marks(callSigns.length)}) AND ${BASE}`, callSigns) : [];
+
+  const cs = new ChangeSet(db, { actorKind: "system", actorId: "fcc", kind: "edit", note: "placed from FCC licenses" }, now);
+  const stmts: { sql: string; params: unknown[] }[] = [];
+  const placed: { lat: number; lon: number }[] = [];
+  for (const s of sites) {
+    const id = s.id as string;
+    const mine = freqRows.filter((f) => f.site_id === id);
+    const control = mine.filter((f) => f.use === "control").map((f) => f.freq_hz);
+    const all = [...new Set(mine.map((f) => f.freq_hz))].sort((a, b) => a - b).slice(0, MAX_FREQS);
+    const key = `${all.join(",")}|${callSigns.join(",")}`;
+    const p = was.get(id);
+    if (!opts.force && p && p.freqs === key && now - (p.at as number) < REPLACE_MS) {
+      if (s.lat != null) placed.push({ lat: s.lat as number, lon: s.lon as number });
+      continue;
+    }
+    if (!control.length) continue;
+    // The system's licenses' spots, and every base station on its frequencies (the fingerprint).
+    const rows = byCall.slice();
+    for (const f of all) rows.push(...(await fcc.all<FccRow>(`SELECT ${COLS} FROM transmitter WHERE freq_center_hz BETWEEN ? AND ? AND ${BASE}`, [f - HALF_CHANNEL, f + HALF_CHANNEL])));
+    const r = choose(rows, control, all, new Set(callSigns));
+    const method = r.transmitters.some((t) => callSigns.includes(t.callSign)) ? "call_sign" : "fingerprint";
+    stmts.push({ sql: "DELETE FROM site_transmitters WHERE site_id = ?", params: [id] });
+    stmts.push({ sql: "INSERT OR REPLACE INTO placements (site_id, at, method, note, freqs) VALUES (?, ?, ?, ?, ?)", params: [id, now, r.transmitters.length ? method : "none", r.note, key] });
+    if (!r.transmitters.length) {
+      out.unplaced.push({ site: id, note: r.note });
+      continue;
+    }
+    const tx: unknown[][] = [];
+    for (const t of r.transmitters) {
+      const w = await places.at(t.state, t.lat, t.lon);
+      tx.push([id, t.callSign, t.licensee, t.lat, t.lon, t.heightM, t.erpW, t.freqHz, t.stationClass, w.state, w.county, w.place, now]);
+    }
+    stmts.push(...insertRows("site_transmitters", ["site_id", "call_sign", "licensee", "lat", "lon", "height_m", "erp_w", "freq_hz", "station_class", "state", "county", "place", "at"], tx, "ON CONFLICT (site_id, call_sign, lat, lon) DO NOTHING"));
+    // The site at its transmitters' centre.
+    const lat = round(r.transmitters.reduce((a, t) => a + t.lat, 0) / r.transmitters.length);
+    const lon = round(r.transmitters.reduce((a, t) => a + t.lon, 0) / r.transmitters.length);
+    if (s.lat == null || distanceKm([s.lat as number, s.lon as number], [lat, lon]) > 0.1) {
+      await cs.set("site", id, "lat", lat);
+      await cs.set("site", id, "lon", lon);
+      await cs.set("site", id, "loc_source", "fcc");
+    }
+    placed.push({ lat, lon });
+    out.placed.push(id);
+    // The licenses it found: kept as the system's (a lookup's never replaces the air's or a person's).
+    for (const t of r.transmitters.filter((x) => x.control)) {
+      const f = Math.round(t.freqHz / 6250) * 6250;
+      const have = licenses.find((l) => l.freq_hz === f);
+      if (!have) {
+        licenses.push(await cs.create("license", { system_id: systemId, freq_hz: f, call_sign: t.callSign, name: t.licensee, source: "lookup" }));
+      } else if (have.call_sign === t.callSign && !have.name && t.licensee) {
+        await cs.set("license", have.id as string, "name", t.licensee);
+        have.name = t.licensee;
+      }
+    }
+  }
+  if (placed.length) {
+    const sys = await cs.get("system", systemId);
+    const lat = round(placed.reduce((a, p) => a + p.lat, 0) / placed.length);
+    const lon = round(placed.reduce((a, p) => a + p.lon, 0) / placed.length);
+    if (sys && (sys.lat == null || distanceKm([sys.lat as number, sys.lon as number], [lat, lon]) > 0.1)) {
+      await cs.set("system", systemId, "lat", lat);
+      await cs.set("system", systemId, "lon", lon);
+    }
+  }
+  if (!cs.empty) cs.bump(systemId);
+  await cs.commit();
+  if (stmts.length) await db.batch(stmts);
+  if (out.placed.length) await reindex(db, systemId);
+  return out;
+}
+
+const round = (v: number) => Math.round(v * 1e5) / 1e5;

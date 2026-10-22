@@ -1,5 +1,5 @@
 -- ArgusRF's FCC ULS database (the D1 database `argus`), as its ingest builds it:
--- copied from robotastic/argusrf ingest/src/db.ts (SCHEMA + INDEXES) at 856f4c9.
+-- copied from robotastic/argusrf ingest/src/db.ts (SCHEMA + INDEXES) at 03ea815.
 -- The FCC lookup reads it; tests and local runs build a small one from this.
 -- If ArgusRF changes its schema, copy it again (test/fcc.test.ts checks the columns the lookup reads).
 
@@ -84,6 +84,13 @@ CREATE TABLE transmitter (
   -- Status.
   radio_service_code  TEXT,
   radio_service_desc  TEXT,
+  -- The station's class (FR.class_station_code), verbatim: FB a base, FB2 a
+  -- mobile relay (repeater), FB4 a community repeater, FB6/FB7 a private
+  -- carrier's, FB8 a centralized trunk relay, FX1 a control station, MO a
+  -- mobile (MO8 a trunked one). Suffixes: C interconnect, T temporary,
+  -- S stand-by, I itinerant (J/K/L: those with interconnect). Whether a
+  -- system is trunked is mostly its radio service's ("..., Trunked").
+  class_station_code  TEXT,
   license_status      TEXT,
   grant_date          TEXT,
   expired_date        TEXT
@@ -133,6 +140,13 @@ CREATE TABLE transmitter_inactive (
   -- Status.
   radio_service_code  TEXT,
   radio_service_desc  TEXT,
+  -- The station's class (FR.class_station_code), verbatim: FB a base, FB2 a
+  -- mobile relay (repeater), FB4 a community repeater, FB6/FB7 a private
+  -- carrier's, FB8 a centralized trunk relay, FX1 a control station, MO a
+  -- mobile (MO8 a trunked one). Suffixes: C interconnect, T temporary,
+  -- S stand-by, I itinerant (J/K/L: those with interconnect). Whether a
+  -- system is trunked is mostly its radio service's ("..., Trunked").
+  class_station_code  TEXT,
   license_status      TEXT,
   grant_date          TEXT,
   expired_date        TEXT

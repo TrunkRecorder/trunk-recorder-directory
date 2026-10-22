@@ -93,7 +93,55 @@ export async function get<T>(path: string): Promise<T> {
 
 export const mhz = (hz: number) => (hz / 1e6).toFixed(5).replace(/0{1,2}$/, "");
 export const hex = (n: number | null) => (n == null ? "—" : n.toString(16).toUpperCase());
-export const TYPE: Record<string, string> = { p25: "P25", smartnet: "SmartNet", dmr: "DMR", nxdn: "NXDN" };
+export const TYPE: Record<string, string> = { p25: "P25", smartnet: "SmartNet", dmr: "DMR", nxdn: "NXDN", edacs: "EDACS" };
+
+/** A system in a list (src/explore.ts). */
+export interface SystemSummary {
+  id: string;
+  name: string;
+  type: string;
+  licensee: string;
+  sites: number;
+  counties: number;
+  talkgroupCount: number;
+  lastHeard: number | null;
+  stale: boolean;
+}
+
+export interface NearSystem extends SystemSummary {
+  distanceKm: number;
+  bearingDeg: number;
+  bandMhz: number | null;
+  transmitters: { lat: number; lon: number; heightM: number | null; erpW: number | null; freqHz: number | null; callSign: string }[];
+}
+
+export interface PlaceHit {
+  geoid: string;
+  kind: "state" | "county" | "place";
+  state: string;
+  name: string;
+  transmitters: number;
+  county: string | null;
+}
+
+export interface MapSite {
+  site: string;
+  system: string;
+  name: string;
+  type: string;
+  stale: boolean;
+  at: [number, number][];
+}
+
+/** A system's name, or who holds its licenses, or that it has neither yet. */
+export const nameOf = (s: { name: string; licensee?: string }) => s.name || (s.licensee ? titleCase(s.licensee) : "Unnamed system");
+
+/** FCC licensees are in capitals: "DISTRICT OF COLUMBIA" → "District of Columbia". */
+export function titleCase(s: string): string {
+  if (s !== s.toUpperCase()) return s;
+  const small = new Set(["of", "and", "the", "for", "in", "on", "at", "to"]);
+  return s.toLowerCase().replace(/\b([a-z])([a-z']*)/g, (w, a: string, b: string, i: number) => (i > 0 && small.has(w) ? w : a.toUpperCase() + b));
+}
 
 export function ago(t: number | null): string {
   if (!t) return "never";

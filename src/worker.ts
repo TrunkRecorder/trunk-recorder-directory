@@ -4,9 +4,11 @@
 //                      app's own routes, /directory/systems/…, get the app)
 //   /api/v1/fcc/*      the FCC license lookup TRP asks (fcc/api.ts, on ArgusRF's D1)
 
-import { BASE, handle, json } from "./api.ts";
+import { BASE, handle, isAdmin, json } from "./api.ts";
 import { d1 } from "./db.ts";
 import { FCC_BASE, handleFcc } from "./fcc/api.ts";
+import { Places } from "./places.ts";
+import { tile, upload } from "./tiles.ts";
 
 export interface Env {
   DB: D1Database;
@@ -18,11 +20,32 @@ export interface Env {
   FCC_DB: D1Database;
   /** FCC lookups per client IP. */
   FCC_LIMIT?: RateLimit;
+  /** The map's basemap (tiles/us.pmtiles; scripts/maps.ts uploads it). */
+  MAPS?: R2Bucket;
 }
 
+/** The Census boundaries, from this Worker's own files (scripts/geo.ts), kept while it runs. */
+let places: { assets: Fetcher; p: Places } | null = null;
+const placesOf = (assets: Fetcher) => {
+  if (!places || places.assets !== assets) {
+    places = { assets, p: new Places(async (st) => {
+      const r = await assets.fetch(`https://assets.local/directory/geo/states/${encodeURIComponent(st)}.json`);
+      return r.ok ? r.text() : null;
+    }) };
+  }
+  return places.p;
+};
+
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
+    const t = await tile(req, env.MAPS, ctx);
+    if (t) return t;
+    if (url.pathname.startsWith(`${BASE}/admin/maps/`)) {
+      if (!isAdmin({ adminToken: env.ADMIN_TOKEN }, req)) return json({ error: "needs an admin's token" }, 401);
+      if (!env.MAPS) return json({ error: "no maps bucket here" }, 400);
+      return (await upload(req, url.pathname.slice(BASE.length), env.MAPS)) ?? json({ error: "not found" }, 404);
+    }
     if (url.pathname.startsWith(`${FCC_BASE}/`)) {
       if (req.method === "POST" && env.FCC_LIMIT) {
         const ip = req.headers.get("cf-connecting-ip") ?? "";
@@ -46,6 +69,8 @@ export default {
             db: d1(env.DB),
             putObservation: async (key, body) => void (await env.OBSERVATIONS.put(key, body, { httpMetadata: { contentType: "application/json" } })),
             adminToken: env.ADMIN_TOKEN,
+            fcc: d1(env.FCC_DB),
+            places: placesOf(env.ASSETS),
           },
           req,
         );
