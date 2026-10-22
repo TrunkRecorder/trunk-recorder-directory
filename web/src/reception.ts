@@ -70,3 +70,31 @@ export function level(dbm: number): string {
 export function best(txs: Tx[], at: [number, number]): number {
   return txs.reduce((m, t) => Math.max(m, receivedDbm(t, at)), -Infinity);
 }
+
+/**
+ * Where a system would be heard: the best signal of any of its transmitters
+ * on a grid around them, as squares by level (only where it's at least weak).
+ * Simulcast towers merge into one footprint.
+ */
+export function coverage(txs: Tx[], cells = 72): { type: "FeatureCollection"; features: { type: "Feature"; properties: { level: string }; geometry: { type: "Polygon"; coordinates: [number, number][][] } }[] } {
+  const features: ReturnType<typeof coverage>["features"] = [];
+  if (!txs.length) return { type: "FeatureCollection", features };
+  const lat0 = txs.reduce((a, t) => a + t.lat, 0) / txs.length;
+  const lon0 = txs.reduce((a, t) => a + t.lon, 0) / txs.length;
+  const kmLon = 111.32 * Math.cos((lat0 * Math.PI) / 180);
+  const spread = Math.max(...txs.map((t) => distanceKm([lat0, lon0], [t.lat, t.lon])));
+  const half = Math.min(160, spread + Math.max(...txs.map((t) => reachKm(t, LEVELS[3].min))));
+  const step = (2 * half) / cells;
+  for (let i = 0; i < cells; i++) {
+    for (let j = 0; j < cells; j++) {
+      const lat = lat0 - half / 111.32 + ((i + 0.5) * step) / 111.32;
+      const lon = lon0 - half / kmLon + ((j + 0.5) * step) / kmLon;
+      const l = level(best(txs, [lat, lon]));
+      if (l === "Unlikely") continue;
+      const dy = step / 2 / 111.32;
+      const dx = step / 2 / kmLon;
+      features.push({ type: "Feature", properties: { level: l }, geometry: { type: "Polygon", coordinates: [[[lon - dx, lat - dy], [lon + dx, lat - dy], [lon + dx, lat + dy], [lon - dx, lat + dy], [lon - dx, lat - dy]]] } });
+    }
+  }
+  return { type: "FeatureCollection", features };
+}

@@ -3,7 +3,7 @@
 // adding it to Trunk Recorder Pro.
 
 import { useEffect, useMemo, useState } from "react";
-import { ago, get, hex, mhz, NotFound, TYPE, API, type HistoryEntry, type SystemView, type TalkgroupView } from "./api.ts";
+import { ago, get, hex, mhz, NotFound, titleCase, TYPE, API, type HistoryEntry, type SystemView, type TalkgroupView } from "./api.ts";
 import { go, Link } from "./router.tsx";
 import { MapView } from "./MapView.tsx";
 
@@ -15,6 +15,7 @@ export function SystemPage(props: { id: string; tab: Tab; query: URLSearchParams
   const [tgs, setTgs] = useState<TalkgroupView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [where, setWhere] = useState<WhereView | null>(null);
   const at = rev ? `?rev=${rev}` : "";
 
   useEffect(() => {
@@ -27,6 +28,8 @@ export function SystemPage(props: { id: string; tab: Tab; query: URLSearchParams
       (e) => setError(e instanceof NotFound ? "There's no such system." : String(e.message ?? e)),
     );
     get<{ talkgroups: TalkgroupView[] }>(`/systems/${props.id}/talkgroups${at}`).then((r) => r.talkgroups && setTgs(r.talkgroups), () => {});
+    setWhere(null);
+    get<WhereView>(`/systems/${props.id}/where`).then(setWhere, () => setWhere({ transmitters: [], placements: [] }));
   }, [props.id, rev]);
 
   if (error) return <div className="banner bad">{error}</div>;
@@ -41,7 +44,7 @@ export function SystemPage(props: { id: string; tab: Tab; query: URLSearchParams
     <div className="stack">
       <section className="stack">
         <div className="row">
-          <h1>{sys.name || "Unnamed system"}</h1>
+          <h1>{sys.name || (where?.transmitters[0]?.licensee ? titleCase(where.transmitters[0].licensee) : "Unnamed system")}</h1>
           <span className="spacer" />
           <button className="btn primary" onClick={() => setAdding(true)}>
             Add to Trunk Recorder Pro
@@ -77,7 +80,7 @@ export function SystemPage(props: { id: string; tab: Tab; query: URLSearchParams
         {tab("licenses", `Licenses (${Object.keys(sys.licenses).length})`)}
         {tab("history", "History")}
       </nav>
-      {props.tab === "sites" && <Where sys={sys} />}
+      {props.tab === "sites" && where && <Where sys={sys} w={where} />}
       {props.tab === "sites" && <Sites sys={sys} />}
       {props.tab === "talkgroups" && <Talkgroups sys={sys} tgs={tgs} initial={props.query.get("q") ?? ""} />}
       {props.tab === "licenses" && <Licenses sys={sys} />}
@@ -93,15 +96,11 @@ interface WhereView {
 }
 
 /** Where it is: its sites' licensed transmitters on a map, and the counties and cities they're in. */
-function Where(props: { sys: SystemView }) {
-  const [w, setW] = useState<WhereView | null>(null);
-  useEffect(() => {
-    get<WhereView>(`/systems/${props.sys.id}/where`).then(setW, () => setW({ transmitters: [], placements: [] }));
-  }, [props.sys.id]);
+function Where(props: { sys: SystemView; w: WhereView }) {
+  const w = props.w;
   const layers = useMemo(() => ({
-    sites: { type: "FeatureCollection" as const, features: (w?.transmitters ?? []).map((t) => ({ type: "Feature" as const, properties: { system: props.sys.id, name: props.sys.name, type: props.sys.type, stale: false }, geometry: { type: "Point" as const, coordinates: [t.lon, t.lat] } })) },
+    sites: { type: "FeatureCollection" as const, features: w.transmitters.map((t) => ({ type: "Feature" as const, properties: { system: props.sys.id, name: props.sys.name, type: props.sys.type, stale: false }, geometry: { type: "Point" as const, coordinates: [t.lon, t.lat] } })) },
   }), [w]);
-  if (!w) return null;
   if (!w.transmitters.length) {
     const why = w.placements.find((p) => p.note)?.note;
     return <p className="muted small">Not on the map yet: no FCC license matched its frequencies{why ? ` (${why})` : ""}.</p>;

@@ -11,6 +11,8 @@ import { PMTiles, type RangeResponse, type Source } from "pmtiles";
 
 export const TILES_KEY = "tiles/us.pmtiles";
 export const TILES_BASE = "/directory/tiles";
+/** The edge cache's key version: changed when what's served for a tile changes. */
+const CACHE_VERSION = "2";
 
 class R2Source implements Source {
   private bucket: R2Bucket;
@@ -42,7 +44,8 @@ export async function tile(req: Request, bucket: R2Bucket | undefined, ctx?: Exe
   if (!url.pathname.startsWith(`${TILES_BASE}/`)) return null;
   if (!bucket) return new Response("no basemap here", { status: 404 });
   const cache = typeof caches !== "undefined" ? (caches as unknown as { default: Cache }).default : null;
-  const hit = await cache?.match(req);
+  const key = new Request(`${url.origin}${url.pathname}?cache=${CACHE_VERSION}`);
+  const hit = await cache?.match(key);
   if (hit) return hit;
   const p = tilesOf(bucket);
   let res: Response;
@@ -63,18 +66,14 @@ export async function tile(req: Request, bucket: R2Bucket | undefined, ctx?: Exe
       // (An empty tile: nothing there, the sea.)
       if (!t) res = new Response(null, { status: 204, headers: { "cache-control": "public, max-age=86400", "access-control-allow-origin": "*" } });
       else {
-        // Its tiles are gzipped already: sent so, not again.
-        const gz = h.tileCompression === 2;
-        res = new Response(t.data, {
-          headers: { "content-type": "application/vnd.mapbox-vector-tile", "cache-control": "public, max-age=86400", "access-control-allow-origin": "*", ...(gz ? { "content-encoding": "gzip" } : {}) },
-          ...(gz ? { encodeBody: "manual" } : {}),
-        } as ResponseInit);
+        // (The library hands it over unzipped; Cloudflare compresses it for each client.)
+        res = new Response(t.data, { headers: { "content-type": "application/vnd.mapbox-vector-tile", "cache-control": "public, max-age=86400", "access-control-allow-origin": "*" } });
       }
     }
   } catch (e) {
     return new Response(e instanceof Error ? e.message : String(e), { status: 404 });
   }
-  if (cache && res.status < 300) ctx?.waitUntil(cache.put(req, res.clone()));
+  if (cache && res.status < 300) ctx?.waitUntil(cache.put(key, res.clone()));
   return res;
 }
 

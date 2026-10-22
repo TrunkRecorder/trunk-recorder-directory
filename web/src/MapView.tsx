@@ -53,10 +53,10 @@ function addLayers(map: MlMap, theme: "light" | "dark") {
     },
   });
   map.addLayer({ id: "counties-line", type: "line", source: "counties", minzoom: 5, paint: { "line-color": dark ? "#3a414b" : "#c9ccd2", "line-width": 0.5, "line-opacity": ["interpolate", ["linear"], ["zoom"], 5, 0, 7, 0.8] } });
-  map.addLayer({ id: "reach-fill", type: "fill", source: "reach", paint: { "fill-color": ["match", ["get", "level"], "Good", "#1f9e74", "Fair", "#e0b31e", "#d2457a"], "fill-opacity": 0.12 } });
-  map.addLayer({ id: "reach-line", type: "line", source: "reach", paint: { "line-color": ["match", ["get", "level"], "Good", "#1f9e74", "Fair", "#e0b31e", "#d2457a"], "line-width": 1, "line-opacity": 0.6 } });
+  // Where a system would be heard: squares by level, merged into one footprint (no outlines).
+  map.addLayer({ id: "reach-fill", type: "fill", source: "reach", paint: { "fill-color": ["match", ["get", "level"], "Strong", "#1f9e74", "Good", "#5fbf6a", "Fair", "#e0b31e", "#d2457a"], "fill-opacity": dark ? 0.28 : 0.22, "fill-antialias": false } });
   map.addLayer({
-    id: "licensed", type: "circle", source: "licensed", minzoom: 7,
+    id: "licensed", type: "circle", source: "licensed", minzoom: 8,
     paint: { "circle-radius": 4, "circle-color": "transparent", "circle-stroke-color": dark ? "#8b939e" : "#7d838c", "circle-stroke-width": 1.2, "circle-stroke-opacity": 0.8 },
   });
   map.addLayer({
@@ -104,6 +104,9 @@ export function MapView(props: { view: View; layers: Layers; onMove?: (v: View, 
     let gone = false;
     (async () => {
       const ml = await import("maplibre-gl");
+      // Its worker, as a file of the build (MapLibre finds it by a URL made at run time, which a bundler can't see).
+      // @ts-expect-error: a URL, which Vite gives for ?url.
+      ml.setWorkerUrl((await import("maplibre-gl/dist/maplibre-gl-worker.mjs?url")).default as string);
       const { basemapStyle } = await import("./mapStyle.ts");
       styleOf.current = basemapStyle;
       // @ts-expect-error: a stylesheet, which Vite bundles.
@@ -120,11 +123,14 @@ export function MapView(props: { view: View; layers: Layers; onMove?: (v: View, 
         m.once("sourcedata", () => sync());
         sync();
       });
-      m.on("moveend", () => {
+      const moved = () => {
         const c = m.getCenter();
         const b = m.getBounds();
         cb.current.onMove?.({ center: [Math.round(c.lat * 1e4) / 1e4, Math.round(c.lng * 1e4) / 1e4], zoom: Math.round(m.getZoom() * 10) / 10 }, [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
-      });
+      };
+      m.on("moveend", moved);
+      // (The view it opened on, too: there's no moveend for that.)
+      m.once("load", moved);
       m.on("click", (e: { point: import("maplibre-gl").PointLike; lngLat: { lat: number; lng: number } }) => {
         const hit = m.queryRenderedFeatures(e.point, { layers: ["sites", "licensed", "counties-fill"] }) as MapGeoJSONFeature[];
         const at: [number, number] = [e.lngLat.lat, e.lngLat.lng];

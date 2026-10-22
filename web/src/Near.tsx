@@ -7,8 +7,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { ago, get, nameOf, type NearSystem, type PlaceHit } from "./api.ts";
 import { TypeBadge, TypeFilter, typesOf, typesParam, typesValue, withQuery } from "./filters.tsx";
-import { circle, MapView, type Picked } from "./MapView.tsx";
-import { best, distanceKm, level, LEVELS, reachKm } from "./reception.ts";
+import { MapView, type Picked } from "./MapView.tsx";
+import { best, coverage, distanceKm, level, LEVELS } from "./reception.ts";
 import { go, Link } from "./router.tsx";
 
 const RADII = [25, 50, 100];
@@ -79,9 +79,7 @@ export function NearPage(props: { query: URLSearchParams }) {
   const layers = useMemo(() => {
     const features = rows.flatMap((s) => s.transmitters.map((t) => ({ type: "Feature" as const, properties: { system: s.id, name: nameOf(s), type: s.type, stale: s.stale }, geometry: { type: "Point" as const, coordinates: [t.lon, t.lat] } })));
     const sel = rows.find((r) => r.id === focus);
-    const reach = reception && sel
-      ? { type: "FeatureCollection" as const, features: sel.transmitters.flatMap((t) => [circle([t.lat, t.lon], reachKm(t, -112), { level: "Weak" }), circle([t.lat, t.lon], reachKm(t, -105), { level: "Fair" }), circle([t.lat, t.lon], reachKm(t, -95), { level: "Good" })]) }
-      : undefined;
+    const reach = reception && sel ? coverage(sel.transmitters) : undefined;
     return { sites: { type: "FeatureCollection" as const, features }, me: at, reach };
   }, [rows, focus, reception, at?.[0], at?.[1]]);
 
@@ -177,7 +175,7 @@ export function NearPage(props: { query: URLSearchParams }) {
           <p className="muted small">
             An estimate from each transmitter's licensed power and height, with no terrain: hills, buildings and being indoors can make it 10–30 dB worse.
             {" "}
-            {LEVELS.map((l) => `${l.name} ≥ ${l.min} dBm`).join(" · ")}.
+            {LEVELS.map((l) => `${l.name} ≥ ${l.min} dBm`).join(" · ")}. The map shades where the system picked in the list would be heard.
           </p>
         )}
         {error && <div className="banner bad">{error}</div>}
@@ -200,7 +198,7 @@ export function NearPage(props: { query: URLSearchParams }) {
                     {s.km} km {s.dir}
                   </span>
                   {s.bandMhz && <span>{Math.round(s.bandMhz)} MHz</span>}
-                  {reception && Number.isFinite(s.dbm) && <span>~{Math.round(s.dbm)} dBm</span>}
+                  {reception && Number.isFinite(s.dbm) && <span>about {Math.round(s.dbm)} dBm</span>}
                   {s.name && s.licensee && <span>{s.licensee}</span>}
                   <span>{s.talkgroupCount} talkgroups</span>
                   <span className={s.stale ? "stale" : ""}>heard {ago(s.lastHeard)}</span>

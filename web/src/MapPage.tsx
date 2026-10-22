@@ -21,7 +21,7 @@ interface Licensed {
   frequencies: number;
 }
 
-const LICENSED_ZOOM = 7;
+const LICENSED_ZOOM = 8;
 const US: View = { center: [39.5, -97.5], zoom: 3.4 };
 
 function viewOf(q: URLSearchParams): View {
@@ -56,17 +56,20 @@ export function MapPage(props: { query: URLSearchParams }) {
     if (!showLicensed || !b) return setLicensed([]);
     if (zoom.current < LICENSED_ZOOM) {
       setLicensed([]);
-      return setLicensedNote("Zoom in to see licensed systems.");
+      return setLicensedNote("Zoom in (to a few counties) to see licensed systems.");
     }
     get<{ licensed: Licensed[]; tooBig?: boolean }>(`/map/licensed?bbox=${b.map((v) => v.toFixed(3)).join(",")}`).then(
       (r) => {
         setLicensed(r.licensed);
-        setLicensedNote(r.tooBig ? "Zoom in to see licensed systems." : null);
+        setLicensedNote(r.tooBig ? "Zoom in (to a few counties) to see licensed systems." : null);
       },
       () => setLicensedNote("Licensed systems aren't available right now."),
     );
   };
   useEffect(loadLicensed, [showLicensed]);
+  useEffect(() => {
+    if (showLicensed && view.zoom < LICENSED_ZOOM) setLicensedNote("Zoom in (to a few counties) to see licensed systems.");
+  }, [showLicensed]);
 
   const layers = useMemo(() => {
     const lic: FeatureCollection<Point> = { type: "FeatureCollection", features: licensed.map((l) => ({ type: "Feature", properties: { ...l }, geometry: { type: "Point", coordinates: [l.lon, l.lat] } })) };

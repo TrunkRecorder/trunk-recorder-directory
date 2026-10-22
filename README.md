@@ -103,7 +103,7 @@ and is rate-limited. Stewards' and admins' actions need `ADMIN_TOKEN` (bearer) u
 | `GET /search?q=[&system=&types=]` | By frequency (`857.9875`), call sign, identity (`BEE00.3A9`), talkgroup number in a system, or words (names, licensees); and `places` by name |
 | `GET /places`, `/places/{ST}`, `/places/{ST}/{county}`, `/places/{ST}/{county}/{place}` | By place: states with counts by type; a state's counties and regional systems; a county's systems and cities; a city's systems (Census GEOIDs) |
 | `GET /map/sites`, `GET /map/counties` | Every placed site with its transmitters; each county's count of systems |
-| `GET /map/licensed?bbox=w,s,e,n` | Trunked base stations licensed in a box (3° at most) whose call signs no shared system has |
+| `GET /map/licensed?bbox=w,s,e,n` | Trunked base stations licensed in a box (5° at most) whose call signs no shared system has |
 | `GET /nearby?lat=&lon=[&coarse=1]&radiusKm=` (or `cell=`) | Systems with a transmitter in range, nearest first, with their transmitters (power, height, frequency) |
 | `GET /identify?claim=p25:bee00.3a9/1.5` | What an identity heard on the air is |
 | `POST /observations` | A share from TRP (`src/observation.ts`) |

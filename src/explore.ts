@@ -196,7 +196,7 @@ export async function countyCounts(db: Db, types: string[]): Promise<Record<stri
 }
 
 /** The largest box the licensed layer answers for (degrees), so a request stays one index range. */
-export const LICENSED_MAX_DEG = 3;
+export const LICENSED_MAX_DEG = 5;
 
 export interface Licensed {
   callSign: string;
