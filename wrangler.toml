@@ -49,8 +49,8 @@ namespace_id = "1002"
 # placing sites (src/place.ts). Its schema is copied in src/fcc/schema.sql.
 [[d1_databases]]
 binding = "FCC_DB"
-database_name = "argus-20261018"
-database_id = "40d6b71a-211a-42a2-a04f-8265f00b8018"
+database_name = "argus-20261023"
+database_id = "a6656d52-0e41-417c-bb6b-bced4f7cc9b7"
 
 # The map's basemap (tiles/us.pmtiles): read only here; scripts/maps.ts uploads it.
 # Staging reads the same one.
@@ -101,8 +101,8 @@ namespace_id = "1003"
 # The same FCC database, read only (staging tests read real licenses).
 [[env.staging.d1_databases]]
 binding = "FCC_DB"
-database_name = "argus-20261018"
-database_id = "40d6b71a-211a-42a2-a04f-8265f00b8018"
+database_name = "argus-20261023"
+database_id = "a6656d52-0e41-417c-bb6b-bced4f7cc9b7"
 
 [[env.staging.r2_buckets]]
 binding = "MAPS"

@@ -154,8 +154,8 @@ URLs and admin tokens are kept in `.deploy.env` (not committed).
 
 | | Worker | D1 | R2 |
 |---|---|---|---|
-| production | `trunk-recorder-directory` on the routes `trunkrecorder.pro/directory*` and `trunkrecorder.pro/api/v1/fcc/*` | `directory` (and `argus-20261018`, read only) | `trp-directory-observations`, `trp-directory-maps` |
-| staging | `trunk-recorder-directory-staging` on workers.dev | `directory-staging` (and `argus-20261018`, read only) | `trp-directory-observations-staging`, `trp-directory-maps` |
+| production | `trunk-recorder-directory` on the routes `trunkrecorder.pro/directory*` and `trunkrecorder.pro/api/v1/fcc/*` | `directory` (and `argus-20261023`, read only) | `trp-directory-observations`, `trp-directory-maps` |
+| staging | `trunk-recorder-directory-staging` on workers.dev | `directory-staging` (and `argus-20261023`, read only) | `trp-directory-observations-staging`, `trp-directory-maps` |
 
 The landing page (trunkrecorder.pro, a custom-domain Worker) is untouched. The route on `/directory*` takes those
 paths, and `test:production` checks that both are right.
