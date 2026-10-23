@@ -396,7 +396,14 @@ export async function reindex(db: Db, sys: string): Promise<void> {
   const s = (await db.all<Row>("SELECT id, name, type, status FROM systems WHERE id = ?", [sys]))[0];
   const rows: unknown[][] = [];
   if (s && s.status === "active") {
-    rows.push([sys, sys, "system", `${s.name ?? ""}`]);
+    // Its name, and who holds its licenses (and their call signs): a system is found by any.
+    const lic = await db.all<Row>(
+      `SELECT DISTINCT x.licensee AS who, x.call_sign AS cs FROM site_transmitters x JOIN sites t ON t.id = x.site_id WHERE t.system_id = ?
+       UNION SELECT name, call_sign FROM fcc_licenses WHERE system_id = ?`,
+      [sys, sys],
+    );
+    const words = [...new Set(lic.flatMap((l) => [l.who as string, l.cs as string]).filter(Boolean))];
+    rows.push([sys, sys, "system", [s.name ?? "", ...words].filter(Boolean).join(" ")]);
     for (const t of await db.all<Row>("SELECT id, number, alpha, description, tag, category FROM talkgroups WHERE system_id = ? AND status IN ('active', 'heard')", [sys])) {
       const text = [t.alpha, t.description, t.tag, t.category].filter(Boolean).join(" ");
       if (text) rows.push([t.id, sys, "talkgroup", text]);

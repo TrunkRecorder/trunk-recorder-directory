@@ -253,3 +253,73 @@ describe("the API, writing", { skip: !WRITE && "E2E_WRITE isn't set (read-only r
     made.add(s.json.system);
   });
 });
+
+// Exploring: by place, the map's layers and files, near a point; and a share
+// placed from its FCC licenses (real DC Fire and EMS ones, under this run's WACN).
+const MAPS = process.env.E2E_MAPS === "1";
+describe("exploring", () => {
+  test("by place, the map's layers, near a point: they answer, filtered by type", async () => {
+    const all = await call("GET", "/places?types=p25,smartnet");
+    assert.equal(all.status, 200);
+    assert.ok(Array.isArray(all.json.states) && typeof all.json.unplaced === "number");
+    assert.equal((await call("GET", "/places/DC")).status, 200);
+    assert.equal((await call("GET", "/places/ZZ")).status, 404);
+    assert.ok(Array.isArray((await call("GET", "/map/sites?types=p25")).json.sites));
+    assert.equal(typeof (await call("GET", "/map/counties")).json.counties, "object");
+    const near = await call("GET", "/nearby?lat=38.90&lon=-77.04&coarse=1&radiusKm=25");
+    assert.equal(near.status, 200);
+    assert.ok(Array.isArray(near.json.systems));
+  });
+
+  test("the call signs shared systems have (left off the licensed layer)", async () => {
+    const r = await call("GET", "/map/callsigns");
+    assert.equal(r.status, 200);
+    assert.ok(Array.isArray(r.json.callSigns));
+  });
+
+  test("the map's files: boundaries, fonts, basemap", { skip: !MAPS && "a local build has no basemap" }, async () => {
+    const c = await fetch(`${BASE}/directory/geo/counties.json`);
+    assert.equal(c.status, 200);
+    assert.ok(((await c.json()) as any).features.length > 3000);
+    assert.equal((await fetch(`${BASE}/directory/geo/states/DC.json`)).status, 200);
+    // The licensed layer: Washington's cell has DC's licenses.
+    const li = (await (await fetch(`${BASE}/directory/geo/licensed/index.json`)).json()) as any;
+    assert.ok(li.cells.includes("38_-78") && li.fccData);
+    const cell = (await (await fetch(`${BASE}/directory/geo/licensed/38_-78.json`)).json()) as any;
+    assert.ok(cell.spots.some((x: unknown[]) => x[0] === "WPXT459"));
+    assert.equal((await fetch(`${BASE}/directory/fonts/Noto%20Sans%20Regular/0-255.pbf`)).status, 200);
+    const tj = await fetch(`${BASE}/directory/tiles/us.json`);
+    assert.equal(tj.status, 200);
+    assert.equal(((await tj.json()) as any).maxzoom, 12);
+    // Washington at zoom 10: a vector tile.
+    const t = await fetch(`${BASE}/directory/tiles/10/292/391.mvt`);
+    assert.equal(t.status, 200);
+    assert.equal(t.headers.get("content-type"), "application/vnd.mapbox-vector-tile");
+    assert.ok((await t.arrayBuffer()).byteLength > 1000);
+  });
+
+  describe("a share, placed", { skip: !WRITE && "E2E_WRITE isn't set (read-only run)" }, () => {
+    let id: string | null = null;
+    after(async () => {
+      if (id && TOKEN) await call("POST", `/systems/${id}/hide`, {}, true);
+    });
+    test("a P25 site on DC Fire and EMS's channels is placed at its licensed towers, and found by place, on the map and nearby", async () => {
+      const wacn = WACN + 7;
+      const site = {
+        controlChannelsHz: [855_462_500, 857_987_500],
+        expect: { wacn, sysId: 0x445, rfss: 1, site: 3 },
+        heard: { identity: { nac: 0x443, wacn, sysId: 0x445, rfss: 1, site: 3 }, controlChannelHz: 857_987_500, voice: [{ freqHz: 769_906_250, grants: 2 }], neighbours: [], callSigns: [{ freqHz: 859_987_500, callSign: "KNJE616" }], good: 100, bad: 1 },
+      };
+      const r = await call("POST", "/observations", { v: 1, recorder: recorder(), app: "e2e", system: { type: "p25", name: `e2e placed ${wacn.toString(16)}`, sites: [site] } });
+      assert.equal(r.status, 201, JSON.stringify(r.json));
+      id = r.json.system;
+      const s = (await call("GET", `/systems/${id}`)).json;
+      assert.ok(Math.abs(s.sites[0].lat - 38.91) < 0.1, `placed: ${s.sites[0].lat}`);
+      assert.equal(s.licenses["855462500"].name, "DISTRICT OF COLUMBIA");
+      const map = (await call("GET", "/map/sites?types=p25")).json.sites;
+      assert.ok(map.some((x: any) => x.system === id && x.at.length >= 4));
+      assert.ok((await call("GET", "/nearby?lat=38.90&lon=-77.04&coarse=1&radiusKm=25&types=p25")).json.systems.some((x: any) => x.id === id));
+      if (MAPS) assert.ok((await call("GET", "/places/DC/11001?types=p25")).json.systems.some((x: any) => x.id === id), "in DC's county");
+    });
+  });
+});

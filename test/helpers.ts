@@ -3,7 +3,11 @@
 import { latLngToCell } from "h3-js";
 import { BASE, handle } from "../src/api.ts";
 import type { Observation, ObservedSite } from "../src/observation.ts";
-import { sqlite } from "../src/sqlite.ts";
+import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { Places } from "../src/places.ts";
+import { fccSqlite, sqlite } from "../src/sqlite.ts";
 
 export const TOKEN = "test-admin-token";
 
@@ -12,11 +16,19 @@ export const DC = latLngToCell(38.9, -77.03, 6);
 export const ARLINGTON = latLngToCell(38.88, -77.1, 6);
 export const DENVER = latLngToCell(39.74, -104.99, 6);
 
-export function directory() {
+/** The Census boundaries for DC, Arlington and Prince George's (test/fixtures/geo). */
+export const fixturePlaces = () => new Places((st) => readFile(join(import.meta.dirname, "fixtures", "geo", `${st}.json`), "utf8").catch(() => null));
+
+/** `place`: sites are placed from the FCC fixture's licenses after each share. */
+export function directory(opts: { place?: boolean } = {}) {
   const db = sqlite();
+  if (opts.place) db.raw.exec(readFileSync(join(import.meta.dirname, "fixtures", "places.sql"), "utf8"));
   const kept: Record<string, string> = {};
   let clock = Date.UTC(2026, 9, 21);
-  const env = { db, adminToken: TOKEN, putObservation: async (k: string, b: string) => void (kept[k] = b), now: () => (clock += 1000) };
+  const env = {
+    db, adminToken: TOKEN, putObservation: async (k: string, b: string) => void (kept[k] = b), now: () => (clock += 1000),
+    ...(opts.place ? { fcc: fccSqlite(), places: fixturePlaces() } : {}),
+  };
   const call = async (method: string, path: string, body?: unknown, admin = false) => {
     const res = await handle(env, new Request(`http://x${BASE}${path}`, {
       method,

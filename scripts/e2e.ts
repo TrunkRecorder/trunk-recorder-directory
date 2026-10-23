@@ -48,7 +48,9 @@ async function local(): Promise<number> {
       return 1;
     }
     // The FCC lookup's database: ArgusRF's schema with the fixture's real rows.
-    if ((await run("npx", ["wrangler", "d1", "execute", "argus", "--local", "--env", "staging", "--persist-to", state, "--file", "test/fixtures/fcc.sql"], {}, true)) !== 0) {
+    // (By the name wrangler.toml gives FCC_DB: a new one each FCC refresh.)
+    const fccDb = /binding = "FCC_DB"\ndatabase_name = "([^"]+)"/.exec(readFileSync(join(ROOT, "wrangler.toml"), "utf8"))?.[1] ?? "argus";
+    if ((await run("npx", ["wrangler", "d1", "execute", fccDb, "--local", "--env", "staging", "--persist-to", state, "--file", "test/fixtures/fcc.sql"], {}, true)) !== 0) {
       console.error("loading the FCC fixture into the local D1 failed");
       return 1;
     }
@@ -73,6 +75,8 @@ async function local(): Promise<number> {
       }
       await new Promise((r) => setTimeout(r, 500));
     }
+    // The places table: the fixture's DC, Virginia and Maryland.
+    await run("npx", ["wrangler", "d1", "execute", "directory-staging", "--local", "--env", "staging", "--persist-to", state, "--file", "test/fixtures/places.sql"], {}, true);
     console.log(`wrangler dev (workerd, local D1/R2) on ${base}`);
     // Twice, on the same database: a second run meets the first's data, as staging and production do.
     let code = 0;
@@ -114,6 +118,8 @@ async function remote(name: "staging" | "production"): Promise<number> {
     E2E_ADMIN_TOKEN: env[`${name.toUpperCase()}_ADMIN_TOKEN`] ?? "",
     E2E_WRITE: write,
     E2E_LANDING: name === "production" ? "1" : "0",
+    // Deployed: the basemap, fonts and boundaries are there too.
+    E2E_MAPS: "1",
   });
 }
 

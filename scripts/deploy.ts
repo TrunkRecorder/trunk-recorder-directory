@@ -3,9 +3,11 @@
 //   node scripts/deploy.ts staging      trunk-recorder-directory-staging (workers.dev)
 //   node scripts/deploy.ts production   trunkrecorder.pro/directory
 //
-// 1. Checks first: typecheck, the tests, the site's build (production: staging's end-to-end tests too).
+// 1. The map's data if it isn't made yet (scripts/geo.ts, maps.ts fonts); then checks: typecheck, the
+//    tests, the site's build (production: staging's end-to-end tests too).
 // 2. Its D1 database and R2 bucket, made if they don't exist (the D1 id goes into wrangler.toml).
-// 3. Migrations, then the deploy.
+// 3. Migrations, the places table (when it changed), then the deploy. (The basemap is uploaded apart,
+//    once: node scripts/maps.ts tiles staging.)
 // 4. Its ADMIN_TOKEN, made the first time and kept in .deploy.env (not committed), with its URL.
 // 5. The end-to-end tests against it (production: reading only).
 
@@ -47,7 +49,15 @@ function writeDeployEnv(v: Record<string, string>) {
   writeFileSync(DEPLOY_ENV, `# Deployed directories: their URLs and admin tokens. Not committed (.gitignore).\n${Object.entries(v).map(([k, x]) => `${k}=${x}`).join("\n")}\n`, { mode: 0o600 });
 }
 
-// 1. Checks.
+// 1. The map's data (made once, kept in .cache/), then the checks.
+if (!existsSync(join(ROOT, ".cache/geo/out/geo/counties.json"))) sh("node", ["scripts/geo.ts"]);
+if (!existsSync(join(ROOT, ".cache/maps/fonts/Noto Sans Regular/0-255.pbf"))) sh("node", ["scripts/maps.ts", "fonts"]);
+// The licensed layer, from an ArgusRF build (made per FCC refresh: node scripts/licensed.ts <its spectrum.db>).
+if (!existsSync(join(ROOT, ".cache/geo/out/geo/licensed/index.json"))) {
+  const fcc = process.env.FCC_DB_PATH ?? join(ROOT, "..", "argusrf", "build", "spectrum.db");
+  if (existsSync(fcc)) sh("node", ["scripts/licensed.ts", fcc]);
+  else console.warn(`(no ${fcc}: the map's licensed layer isn't in this build — node scripts/licensed.ts <ArgusRF's spectrum.db>)`);
+}
 sh("npx", ["tsc", "--noEmit"]);
 sh("node", ["--test", "test/*.test.ts"]);
 sh("npx", ["vite", "build", "--logLevel", "warn"]);
@@ -68,8 +78,15 @@ writeFileSync(join(ROOT, "wrangler.toml"), toml.replace(re, `$1"${dbId}"`));
 const buckets = sh("npx", ["wrangler", "r2", "bucket", "list"], { capture: true });
 if (!new RegExp(`name:\\s+${BUCKET}\\b`).test(buckets)) sh("npx", ["wrangler", "r2", "bucket", "create", BUCKET]);
 
-// 3. Migrations, then the Worker.
+// 3. Migrations (and the places table, when its rows have changed), then the Worker.
 sh("npx", ["wrangler", "d1", "migrations", "apply", DB, "--remote", ...env], { input: "y\n" });
+const placesSql = join(ROOT, ".cache/geo/out/places.sql");
+const placesKey = `${KEY}_PLACES`;
+const placesStamp = String(readFileSync(placesSql).length);
+if (readDeployEnv()[placesKey] !== placesStamp) {
+  sh("node", ["scripts/maps.ts", "places", target]);
+  writeDeployEnv({ ...readDeployEnv(), [placesKey]: placesStamp });
+}
 const out = sh("npx", ["wrangler", "deploy", ...env], { capture: true });
 console.log(out);
 const url = target === "staging" ? /https:\/\/[\w.-]+\.workers\.dev/.exec(out)?.[0] : "https://trunkrecorder.pro";

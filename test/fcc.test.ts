@@ -95,7 +95,7 @@ describe("POST /api/v1/fcc/identify", () => {
     queries = [];
     await post("identify", { lat: 38.9, lon: -77.03, radiusM: 9e9, signals: [{ freqHz: 857_987_500 }] });
     const bb = boundingBox(38.9, -77.03, 150_000);
-    assert.ok(Math.abs((queries[0][3] as number) - bb.minLat) < 1e-9);
+    assert.ok(queries[0].some((v) => typeof v === "number" && Math.abs(v - bb.minLat) < 1e-9), JSON.stringify(queries[0]));
   });
 
   it("clamps a signal's width", async () => {

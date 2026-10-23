@@ -44,12 +44,19 @@ namespace_id = "1002"
   limit = 20
   period = 60
 
-# ArgusRF's FCC ULS database (robotastic/argusrf builds and uploads it), read
-# only, for /api/v1/fcc/*. Its schema is copied in src/fcc/schema.sql.
+# ArgusRF's FCC ULS database (robotastic/argusrf builds and uploads it, a new
+# database per FCC refresh: argus-YYYYMMDD), read only: /api/v1/fcc/*, and
+# placing sites (src/place.ts). Its schema is copied in src/fcc/schema.sql.
 [[d1_databases]]
 binding = "FCC_DB"
-database_name = "argus"
-database_id = "2055819c-cf47-48e9-a9fe-265c1ef0cd03"
+database_name = "argus-20261023"
+database_id = "a6656d52-0e41-417c-bb6b-bced4f7cc9b7"
+
+# The map's basemap (tiles/us.pmtiles): read only here; scripts/maps.ts uploads it.
+# Staging reads the same one.
+[[r2_buckets]]
+binding = "MAPS"
+bucket_name = "trp-directory-maps"
 
 # FCC lookups, per IP.
 [[ratelimits]]
@@ -94,8 +101,12 @@ namespace_id = "1003"
 # The same FCC database, read only (staging tests read real licenses).
 [[env.staging.d1_databases]]
 binding = "FCC_DB"
-database_name = "argus"
-database_id = "2055819c-cf47-48e9-a9fe-265c1ef0cd03"
+database_name = "argus-20261023"
+database_id = "a6656d52-0e41-417c-bb6b-bced4f7cc9b7"
+
+[[env.staging.r2_buckets]]
+binding = "MAPS"
+bucket_name = "trp-directory-maps"
 
 [[env.staging.ratelimits]]
 name = "FCC_LIMIT"

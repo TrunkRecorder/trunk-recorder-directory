@@ -11,6 +11,10 @@ import { keeper, mergeSystems } from "./merge.ts";
 import { NameIndex } from "./names.ts";
 import { Invalid, parseObservation } from "./observation.ts";
 import { changeset, diff, getSystem, getTalkgroups, history, near, search, talkgroupsCsv, trpSystem } from "./read.ts";
+import { city, county, countyCounts, mapSites, nearby, parseTypes, placesNamed, sharedCallSigns, state, states, where } from "./explore.ts";
+import { cellCenter, validCell } from "./geo.ts";
+import { placeSystem } from "./place.ts";
+import type { Places } from "./places.ts";
 import { revertActor, revertChangeset, revertSystemTo } from "./revert.ts";
 import { applyShare, matchShare, reindex, resolve } from "./share.ts";
 import { ChangeSet, type KindName, PREFIX_KIND } from "./store.ts";
@@ -23,6 +27,9 @@ export interface Env {
   putObservation(key: string, body: string): Promise<void>;
   adminToken?: string;
   now?: () => number;
+  /** ArgusRF's FCC database (read only) and the Census boundaries: for placing sites (place.ts). */
+  fcc?: Db;
+  places?: Places;
 }
 
 const MAX_BODY = 4 << 20;
@@ -43,7 +50,7 @@ async function systemOr301(env: Env, id: string, url: URL): Promise<string | Res
   return json({ movedTo: now }, 301, { location: to });
 }
 
-function isAdmin(env: Env, req: Request): boolean {
+export function isAdmin(env: Pick<Env, "adminToken">, req: Request): boolean {
   const auth = req.headers.get("authorization") ?? "";
   const token = env.adminToken;
   if (!token || !auth.startsWith("Bearer ")) return false;
@@ -110,6 +117,8 @@ export async function handle(env: Env, req: Request): Promise<Response> {
         const tgs = (await getTalkgroups(db, id, { sites }))!.filter((t) => t.alpha || q.get("all") === "1");
         return json({ system: trpSystem(s, sites), talkgroupsCsv: talkgroupsCsv(tgs) }, 200, { etag: `"${s.id}.${s.rev}"` });
       }
+      r = m(/^\/systems\/(sys_[0-9a-z]+)\/where$/);
+      if (r) return json(await where(db, await resolve(db, r[1])));
       r = m(/^\/systems\/(sys_[0-9a-z]+)\/history$/);
       if (r) return json({ history: await history(db, await resolve(db, r[1]), { before: num(q.get("before")) }) });
       r = m(/^\/systems\/(sys_[0-9a-z]+)\/diff$/);
@@ -140,7 +149,47 @@ export async function handle(env: Env, req: Request): Promise<Response> {
         const c = await changeset(db, r[1]);
         return c ? json(c) : err(404, "no such change set");
       }
-      if (path === "/search") return json({ hits: await search(db, q.get("q") ?? "", { system: q.get("system") ?? undefined }) });
+      if (path === "/search") {
+        const types = parseTypes(q.get("types"));
+        let hits = await search(db, q.get("q") ?? "", { system: q.get("system") ?? undefined });
+        if (q.get("types")) {
+          const kinds = new Map<string, string>();
+          for (const h of hits) if (!kinds.has(h.systemId)) kinds.set(h.systemId, ((await first<Row>(db, "SELECT type FROM systems WHERE id = ?", [h.systemId]))?.type as string) ?? "");
+          hits = hits.filter((h) => types.includes(kinds.get(h.systemId) ?? ""));
+        }
+        return json({ hits, places: q.get("system") ? [] : await placesNamed(db, q.get("q") ?? "") });
+      }
+      // ── exploring: by place, on the map, near a point ──
+      const types = parseTypes(q.get("types"));
+      if (path === "/places") return json(await states(db, types));
+      r = m(/^\/places\/([A-Z]{2})$/);
+      if (r) {
+        const s = await state(db, r[1], types);
+        return s ? json(s) : err(404, "no such state");
+      }
+      r = m(/^\/places\/([A-Z]{2})\/(\d{5})$/);
+      if (r) {
+        const c = await county(db, r[1], r[2], types);
+        return c ? json(c) : err(404, "no such county");
+      }
+      r = m(/^\/places\/([A-Z]{2})\/(\d{5})\/(\d{7})$/);
+      if (r) {
+        const c = await city(db, r[1], r[2], r[3], types);
+        return c ? json(c) : err(404, "no such city");
+      }
+      if (path === "/map/sites") return json({ sites: await mapSites(db, types) });
+      if (path === "/map/counties") return json({ counties: await countyCounts(db, types) });
+      // (The licensed layer itself is the site's files, by 1° cell: scripts/licensed.ts.)
+      if (path === "/map/callsigns") return json({ callSigns: await sharedCallSigns(db) });
+      if (path === "/nearby") {
+        // A coarse cell (what the page sends: ~3 km), or a point.
+        const cell = validCell(q.get("cell"));
+        const at: [number, number] | null = cell ? cellCenter(cell) : num(q.get("lat")) !== undefined && num(q.get("lon")) !== undefined ? [num(q.get("lat"))!, num(q.get("lon"))!] : null;
+        if (!at) return err(400, "cell, or lat and lon");
+        const radius = Math.min(num(q.get("radiusKm")) ?? 50, 250);
+        // (A rough place: a little further, so what's in range of the real one is in.)
+        return json({ at, systems: await nearby(db, at, radius + (cell || q.get("coarse") === "1" ? 4 : 0), types) });
+      }
       if (path === "/identify") {
         const claim = (q.get("claim") ?? "").toLowerCase();
         if (!claim) return err(400, "claim is required");
@@ -205,6 +254,17 @@ export async function handle(env: Env, req: Request): Promise<Response> {
       for (const s of revs.keys()) await reindex(db, s);
       return json({ changesetId: cs.id, systems: Object.fromEntries(revs) });
     }
+    r = m(/^\/systems\/(sys_[0-9a-z]+)\/place$/);
+    if (req.method === "POST" && r) {
+      if (!env.fcc || !env.places) return err(400, "no FCC database here");
+      return json(await placeSystem(db, env.fcc, env.places, await resolve(db, r[1]), { now: env.now?.() ?? Date.now(), force: true }));
+    }
+    if (req.method === "POST" && path === "/place") {
+      if (!env.fcc || !env.places) return err(400, "no FCC database here");
+      const out: Record<string, unknown> = {};
+      for (const s of await db.all<Row>("SELECT id FROM systems WHERE status = 'active'")) out[s.id as string] = await placeSystem(db, env.fcc, env.places, s.id as string, { now: env.now?.() ?? Date.now(), force: q.get("force") === "1" });
+      return json({ systems: out });
+    }
     r = m(/^\/systems\/(sys_[0-9a-z]+)\/(hide|unhide|retire)$/);
     if (req.method === "POST" && r) {
       const cs = new ChangeSet(db, { ...actor, kind: r[2] === "retire" ? "retire" : "hide" });
@@ -259,6 +319,14 @@ async function share(env: Env, req: Request): Promise<Response> {
     } else {
       const open = await first(db, "SELECT id FROM merge_proposals WHERE ((a_id = ? AND b_id = ?) OR (a_id = ? AND b_id = ?))", [systemId, w.id, w.id, systemId]);
       if (!open) await db.batch([{ sql: "INSERT INTO merge_proposals (id, a_id, b_id, evidence, score, status, at) VALUES (?, ?, ?, ?, ?, 'open', ?)", params: [newId("mp"), systemId, w.id, JSON.stringify([w.why]), 1, now] }]);
+    }
+  }
+  // Where its sites are, from the FCC licenses on their frequencies (a failure here doesn't fail the share).
+  if (env.fcc && env.places) {
+    try {
+      await placeSystem(db, env.fcc, env.places, systemId, { now });
+    } catch (e) {
+      console.warn(`placing ${systemId}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
   await db.batch([{ sql: "INSERT INTO observations (id, recorder_id, at, app_version, cell, system_id, base_rev, r2_key, status, changeset_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'applied', ?)", params: [id, obs.recorder, now, obs.app, obs.cell ?? null, systemId, obs.directory?.rev ?? null, key, res.changesetId] }]);

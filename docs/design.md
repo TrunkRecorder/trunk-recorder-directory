@@ -210,6 +210,17 @@ by **agencies**. TRP's conventional system is a list the user makes from them.
 3. **Inference:** a site heard only by recorders in one area sits near them. That's a
    weak guess, labelled as one.
 
+**As built (src/place.ts):** a site's transmitters are the licensed base and repeater
+stations (station class FB…, which ArgusRF keeps since 2026-10-18) on its frequencies,
+kept in `site_transmitters` with their height, ERP and state, county and Census place.
+Each licensed spot is scored by how many of the site's frequencies are licensed there,
+across call signs (one tower can hold its channels under several). The call signs the
+system has (heard on the air, typed, looked up) win ties; with none, the frequencies
+alone (a "fingerprint") place it when a spot holds two or more of them. Two equally
+good spots far apart (a channel reused across a state) aren't guessed: `placements`
+says why. A simulcast site keeps every tower. Placing runs after each share, again when
+a site's frequencies change, and monthly.
+
 **Where it can be received:** each site carries a coverage estimate, from two sources.
 - **Predicted coverage:**
   - the FCC location's ERP and antenna height;
@@ -322,6 +333,15 @@ searched.
   - Sites are drawn as towers, and the cells they're heard in as shading.
   - Conventional channels are grouped by agency.
   - Moving the map updates the list beside it.
+
+**As built:** "Near me" (`/`), the national map (`/map`), browse (`/browse/ST/county/place`)
+and search, all filtered by type with every choice in the URL. The page sends only a
+location rounded to ~3 km; distances and the reception estimate (Okumura–Hata from each
+transmitter's licensed ERP and height, no terrain, drawn as a footprint on a grid) are
+computed in the browser. A system with transmitters in 4 or more of a state's counties
+is listed once as regional rather than under each. The licensed-but-not-shared layer
+comes from the FCC data directly (trunked radio services, and FB8 relays of any). Street
+addresses and ZIPs aren't searched yet; counties and cities are.
 
 ### The results list and its filters
 

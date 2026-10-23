@@ -1,35 +1,89 @@
-// The directory's website: find systems near a place or by anything they have,
-// read one (sites, talkgroups, licenses, history), and add it to Trunk Recorder Pro.
+// The directory's website: what you can hear from where you are, every shared
+// system on a map, by state, county and city, and search; a system's page
+// (sites, talkgroups, licenses, history), and adding it to Trunk Recorder Pro.
 
-import { StrictMode } from "react";
+import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+
+import { BrowsePage } from "./Browse.tsx";
 import { ChangesetPage } from "./Changeset.tsx";
-import { Home } from "./Home.tsx";
-import { Link, useRoute } from "./router.tsx";
+import { ExplorePage } from "./Explore.tsx";
+import { go, Link, useRoute } from "./router.tsx";
+import { SearchPage } from "./Search.tsx";
 import { SystemPage } from "./System.tsx";
+import { setPref, useTheme, type ThemePref } from "./theme.ts";
 import "./style.css";
+
+
+function Redirect(props: { to: string }) {
+  useEffect(() => go(props.to, true), []);
+  return null;
+}
+
+function ThemeSwitch() {
+  const { pref } = useTheme();
+  return (
+    <select className="theme" value={pref} onChange={(e) => setPref(e.target.value as ThemePref)} aria-label="Theme">
+      <option value="system">Auto</option>
+      <option value="light">Light</option>
+      <option value="dark">Dark</option>
+    </select>
+  );
+}
+
+function SearchBox(props: { q: string }) {
+  const [text, setText] = useState(props.q);
+  return (
+    <form
+      className="top-search"
+      role="search"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (text.trim()) go(`/search?q=${encodeURIComponent(text.trim())}`);
+      }}
+    >
+      <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search names, call signs, places…" aria-label="Search the directory" />
+    </form>
+  );
+}
 
 function App() {
   const { path, query } = useRoute();
   let page: React.ReactNode;
   let m: RegExpExecArray | null;
+  let wide = false;
   if ((m = /^\/systems\/(sys_[0-9a-z]+)(?:\/(talkgroups|sites|licenses|history))?$/.exec(path))) page = <SystemPage id={m[1]} tab={(m[2] as never) ?? "sites"} query={query} />;
   else if ((m = /^\/changesets\/(cs_[0-9a-z]+)$/.exec(path))) page = <ChangesetPage id={m[1]} />;
-  else page = <Home query={query} />;
+  // (The map was /map: it's the home page now, its links still work.)
+  else if (path === "/map") page = <Redirect to={`/${location.search}`} />;
+  else if (path.startsWith("/browse")) page = <BrowsePage path={path} query={query} />;
+  else if (path === "/search") page = <SearchPage key={query.get("q") ?? ""} query={query} />;
+  else [page, wide] = [<ExplorePage query={query} />, true];
+  const nav = (to: string, label: string, on: boolean) => (
+    <Link to={to} className={`nav${on ? " on" : ""}`}>
+      {label}
+    </Link>
+  );
   return (
     <>
       <header className="top">
         <Link to="/" className="brand">
           <span className="logo" aria-hidden="true" />
-          Systems directory
+          <span className="brand-name">Systems directory</span>
         </Link>
-        <span className="spacer" />
-        <a href="/" className="muted">Trunk Recorder Pro</a>
+        <nav className="navs" aria-label="Views">
+          {nav("/", "Map", path === "/" || path === "/map")}
+          {nav("/browse", "Browse", path.startsWith("/browse"))}
+        </nav>
+        <SearchBox key={query.get("q") ?? ""} q={path === "/search" ? (query.get("q") ?? "") : ""} />
+        <ThemeSwitch />
       </header>
-      <main>{page}</main>
-      <footer className="foot muted small">
-        Shared by Trunk Recorder Pro users from what their radios decode. Licenses from the FCC (public domain). Nothing here comes from RadioReference.
-      </footer>
+      <main className={wide ? "wide" : ""}>{page}</main>
+      {!wide && (
+        <footer className="foot muted small">
+          Shared by Trunk Recorder Pro users from what their radios decode. Licenses from the FCC, places from the Census Bureau (public domain); map © OpenStreetMap contributors. Nothing here comes from RadioReference.
+        </footer>
+      )}
     </>
   );
 }

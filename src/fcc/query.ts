@@ -1,7 +1,7 @@
 // ArgusRF's FCC license lookup: which licensed transmitters are on a band near
 // a point, from its FCC ULS database (D1 `argus`, schema in schema.sql).
 //
-// COPIED from robotastic/argusrf at 856f4c9: shared/src/query.ts and the
+// COPIED from robotastic/argusrf at faeb0c8: shared/src/query.ts and the
 // functions of shared/src/geo.ts it uses, unchanged but for this header and
 // the one import made local. ArgusRF owns the data and its schema; this copy
 // is how the directory's Worker reads it. If ArgusRF changes either, copy them
@@ -9,7 +9,7 @@
 //
 // ── query.ts ──
 
-// The core lookup (ArgusRF spec §5.1), written to run unchanged on better-sqlite3
+// The core lookup (spec §5.1), written to run unchanged on better-sqlite3
 // locally and on Cloudflare D1 in production.
 //
 // No R-tree. D1 has no virtual tables, so the spec's 3D R-tree cannot survive
@@ -75,6 +75,8 @@ export interface TransmitterRow {
   bandwidth_hz: number | null;
   bandwidth_source: string | null;
   emission_designator: string | null;
+  /** Every emission licensed on the frequency there, comma separated (null before the column existed). */
+  emissions: string | null;
   power_output_w: number | null;
   power_erp_w: number | null;
   lat: number;
@@ -92,6 +94,8 @@ export interface TransmitterRow {
   frn: string | null;
   radio_service_code: string | null;
   radio_service_desc: string | null;
+  /** The FCC's station class, verbatim (FB2 a repeater, FB8 a centralized trunk relay, FX1 a control station, MO a mobile; a C suffix: interconnect, T: temporary). Null before the column existed. */
+  class_station_code: string | null;
   license_status: string | null;
   grant_date: string | null;
   expired_date: string | null;
@@ -113,7 +117,10 @@ export interface TransmitterHit extends TransmitterRow {
  * belt-and-suspenders.
  */
 function lookupSql(table: "transmitter" | "transmitter_inactive"): string {
-  const activeClause = table === "transmitter" ? "AND t.license_status = 'A'" : "";
+  // (`+`: by the frequency index only. D1 keeps no statistics, so its planner
+  // would take idx_tx_status (every active row is 'A': the whole table) or the
+  // latitude index (a band across the country) instead.)
+  const activeClause = table === "transmitter" ? "AND +t.license_status = 'A'" : "";
   return `
 SELECT t.*, rs.description AS radio_service_desc
   FROM ${table} t
@@ -122,14 +129,46 @@ SELECT t.*, rs.description AS radio_service_desc
    AND t.freq_lower_hz <= ?
    AND t.freq_upper_hz >= ?
    ${activeClause}
-   AND t.lat BETWEEN ? AND ?
-   AND t.lon BETWEEN ? AND ?
+   AND +t.lat BETWEEN ? AND ?
+   AND +t.lon BETWEEN ? AND ?
+ LIMIT ?
+`;
+}
+
+/**
+ * A narrow signal's lookup: licenses whose centre is within the window, by
+ * the centre index (active) or a short range of the lower-edge index
+ * (inactive, which has no centre index). Reads hundreds of rows, not the
+ * 50 MHz window's hundred thousand.
+ */
+function narrowSql(table: "transmitter" | "transmitter_inactive"): string {
+  const activeClause = table === "transmitter" ? "AND +t.license_status = 'A'" : "";
+  const range = table === "transmitter"
+    ? "t.freq_center_hz BETWEEN ? AND ? AND +t.freq_lower_hz BETWEEN ? AND ?"
+    : "+t.freq_center_hz BETWEEN ? AND ? AND t.freq_lower_hz BETWEEN ? AND ?";
+  return `
+SELECT t.*, rs.description AS radio_service_desc
+  FROM ${table} t
+  LEFT JOIN radio_service rs ON rs.code = t.radio_service_code
+ WHERE ${range}
+   ${activeClause}
+   AND +t.lat BETWEEN ? AND ?
+   AND +t.lon BETWEEN ? AND ?
  LIMIT ?
 `;
 }
 
 export const LOOKUP_SQL = lookupSql("transmitter");
 export const LOOKUP_INACTIVE_SQL = lookupSql("transmitter_inactive");
+export const NARROW_SQL = narrowSql("transmitter");
+export const NARROW_INACTIVE_SQL = narrowSql("transmitter_inactive");
+
+/** A selection this wide or narrower is looked up by centre frequency. */
+export const NARROW_MAX_HZ = 200_000;
+/** A narrow signal matches licenses centred within this of it (each side): a 10 kHz window, for a frequency read slightly off. */
+export const NARROW_FUZZ_HZ = 5_000;
+/** How far below the window a narrow match's lower edge can be (its half-width; channels are 25 kHz or less): bounds the inactive table's scan. */
+const NARROW_HALF_SPAN_HZ = 100_000;
 
 export interface LookupResult {
   transmitters: TransmitterHit[];
@@ -148,13 +187,13 @@ async function scan(
   input: LookupInput,
   lo: number,
   hi: number,
-  limit: number
+  limit: number,
+  narrow = false
 ): Promise<TransmitterHit[]> {
   const bb = boundingBox(input.lat, input.lon, input.radiusM);
+  const band = narrow ? [lo, hi, lo - NARROW_HALF_SPAN_HZ, hi] : [hi - MAX_BANDWIDTH_HZ, hi, lo];
   const rows = (await runner.all<TransmitterRow>(sql, [
-    hi - MAX_BANDWIDTH_HZ,
-    hi,
-    lo,
+    ...band,
     bb.minLat, bb.maxLat,
     bb.minLon, bb.maxLon,
     // Over-fetch: the bbox is looser than the radius, so some rows will be
@@ -184,13 +223,16 @@ async function scan(
  * Licensed transmitters plausibly operating on `[freqLo, freqHi]` near the
  * observer, nearest first.
  *
- * Matching is band-overlap, not centre-frequency-±-tolerance: a hit is any
- * license whose *occupied band* intersects the observed band. That handles the
- * wideband case for free — if you are parked inside a signal wider than the
- * SDR's reception bandwidth, the selector sits entirely within the license's
- * band and still matches.
+ * A narrow selection (NARROW_MAX_HZ or less, a channel) matches licenses whose
+ * centre frequency is within NARROW_FUZZ_HZ of it (or the tolerance given, if
+ * larger): a 10 kHz window, so a frequency read slightly off still matches, by
+ * index. A wider selection matches by band overlap: any license whose
+ * *occupied band* intersects it, which handles the wideband case — parked
+ * inside a signal wider than the SDR's view, the selector sits within the
+ * license's band and still matches. (That scan reads every license in a
+ * 50 MHz window, so it's kept for wide selections.)
  *
- * When nothing *active* overlaps the band, it falls back to the
+ * When nothing *active* matches, it falls back to the
  * cancelled/expired/terminated pool and flags the result `historical`. A
  * paging channel whose licenses have all lapsed (the common case) then still
  * names who used to hold it, instead of showing nothing.
@@ -199,15 +241,18 @@ export async function lookupTransmitters(
   runner: QueryRunner,
   input: LookupInput
 ): Promise<LookupResult> {
-  const tol = input.toleranceHz ?? toleranceHz((input.freqLoHz + input.freqHiHz) / 2);
-  const lo = Math.min(input.freqLoHz, input.freqHiHz) - tol;
-  const hi = Math.max(input.freqLoHz, input.freqHiHz) + tol;
   const limit = input.limit ?? 200;
+  const [a, b] = [Math.min(input.freqLoHz, input.freqHiHz), Math.max(input.freqLoHz, input.freqHiHz)];
+  const narrow = b - a <= NARROW_MAX_HZ;
+  const tol = narrow
+    ? Math.max(NARROW_FUZZ_HZ, input.toleranceHz ?? 0)
+    : input.toleranceHz ?? toleranceHz((a + b) / 2);
+  const [lo, hi] = [a - tol, b + tol];
 
-  const active = await scan(runner, LOOKUP_SQL, input, lo, hi, limit);
+  const active = await scan(runner, narrow ? NARROW_SQL : LOOKUP_SQL, input, lo, hi, limit, narrow);
   if (active.length > 0) return { transmitters: active, historical: false };
 
-  const historical = await scan(runner, LOOKUP_INACTIVE_SQL, input, lo, hi, limit);
+  const historical = await scan(runner, narrow ? NARROW_INACTIVE_SQL : LOOKUP_INACTIVE_SQL, input, lo, hi, limit, narrow);
   return { transmitters: historical, historical: historical.length > 0 };
 }
 

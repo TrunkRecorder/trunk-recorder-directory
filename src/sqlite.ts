@@ -31,6 +31,10 @@ export function sqlite(path = ":memory:"): Db & { raw: Database.Database } {
 
 function wrap(raw: Database.Database): Db & { raw: Database.Database } {
   const cache = new Map<string, Database.Statement>();
+  // As D1: at most 100 parameters a statement (so tests catch what only D1 would refuse).
+  const check = (params: unknown[] = []) => {
+    if (params.length > 100) throw new Error(`too many SQL variables: ${params.length} (D1 allows 100)`);
+  };
   const prep = (sql: string) => {
     let s = cache.get(sql);
     if (!s) {
@@ -42,11 +46,13 @@ function wrap(raw: Database.Database): Db & { raw: Database.Database } {
   return {
     raw,
     async all<T>(sql: string, params: unknown[] = []) {
+      check(params);
       return prep(sql).all(...(params as never[])) as T[];
     },
     async batch(stmts) {
       raw.transaction(() => {
         for (const s of stmts) {
+          check(s.params);
           const p = prep(s.sql);
           if (p.reader) p.all(...(s.params as never[]));
           else p.run(...(s.params as never[]));

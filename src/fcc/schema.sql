@@ -1,5 +1,5 @@
 -- ArgusRF's FCC ULS database (the D1 database `argus`), as its ingest builds it:
--- copied from robotastic/argusrf ingest/src/db.ts (SCHEMA + INDEXES) at 856f4c9.
+-- copied from robotastic/argusrf ingest/src/db.ts (SCHEMA + INDEXES) at faeb0c8.
 -- The FCC lookup reads it; tests and local runs build a small one from this.
 -- If ArgusRF changes its schema, copy it again (test/fcc.test.ts checks the columns the lookup reads).
 
@@ -56,6 +56,11 @@ CREATE TABLE transmitter (
   bandwidth_hz        INTEGER,
   bandwidth_source    TEXT,                 -- 'emission' | 'upper_band' | 'service_default' | 'fallback'
   emission_designator TEXT,
+  -- Every emission the license gives this frequency here, comma separated
+  -- (emission_designator is the first): what it may carry. 8K10F1E P25,
+  -- 7K60FXE DMR, 4K00F1E NXDN, 11K2F3E analog FM, 20K0F1D a trunking control
+  -- channel's data...
+  emissions           TEXT,
 
   -- Power. ULS ships TPO and ERP in adjacent, easily-transposed columns; keep
   -- both rather than collapsing to one and losing which is which.
@@ -84,6 +89,13 @@ CREATE TABLE transmitter (
   -- Status.
   radio_service_code  TEXT,
   radio_service_desc  TEXT,
+  -- The station's class (FR.class_station_code), verbatim: FB a base, FB2 a
+  -- mobile relay (repeater), FB4 a community repeater, FB6/FB7 a private
+  -- carrier's, FB8 a centralized trunk relay, FX1 a control station, MO a
+  -- mobile (MO8 a trunked one). Suffixes: C interconnect, T temporary,
+  -- S stand-by, I itinerant (J/K/L: those with interconnect). Whether a
+  -- system is trunked is mostly its radio service's ("..., Trunked").
+  class_station_code  TEXT,
   license_status      TEXT,
   grant_date          TEXT,
   expired_date        TEXT
@@ -105,6 +117,11 @@ CREATE TABLE transmitter_inactive (
   bandwidth_hz        INTEGER,
   bandwidth_source    TEXT,                 -- 'emission' | 'upper_band' | 'service_default' | 'fallback'
   emission_designator TEXT,
+  -- Every emission the license gives this frequency here, comma separated
+  -- (emission_designator is the first): what it may carry. 8K10F1E P25,
+  -- 7K60FXE DMR, 4K00F1E NXDN, 11K2F3E analog FM, 20K0F1D a trunking control
+  -- channel's data...
+  emissions           TEXT,
 
   -- Power. ULS ships TPO and ERP in adjacent, easily-transposed columns; keep
   -- both rather than collapsing to one and losing which is which.
@@ -133,6 +150,13 @@ CREATE TABLE transmitter_inactive (
   -- Status.
   radio_service_code  TEXT,
   radio_service_desc  TEXT,
+  -- The station's class (FR.class_station_code), verbatim: FB a base, FB2 a
+  -- mobile relay (repeater), FB4 a community repeater, FB6/FB7 a private
+  -- carrier's, FB8 a centralized trunk relay, FX1 a control station, MO a
+  -- mobile (MO8 a trunked one). Suffixes: C interconnect, T temporary,
+  -- S stand-by, I itinerant (J/K/L: those with interconnect). Whether a
+  -- system is trunked is mostly its radio service's ("..., Trunked").
+  class_station_code  TEXT,
   license_status      TEXT,
   grant_date          TEXT,
   expired_date        TEXT
@@ -149,7 +173,9 @@ CREATE TABLE radio_service (
 CREATE INDEX idx_tx_lower  ON transmitter(freq_lower_hz, freq_upper_hz);
 CREATE INDEX idx_tx_center ON transmitter(freq_center_hz);
 CREATE INDEX idx_tx_call   ON transmitter(call_sign);
-CREATE INDEX idx_tx_status ON transmitter(license_status);
+-- (No index on license_status: every row here is 'A', and D1 keeps no
+-- statistics, so its planner took that index for any query naming the status
+-- and read the whole table. Queries write +license_status besides.)
 -- Spatial filtering rides along on the frequency scan; this only helps the
 -- "what is near me on any frequency" case.
 CREATE INDEX idx_tx_latlon ON transmitter(lat, lon);

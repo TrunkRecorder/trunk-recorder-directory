@@ -1,0 +1,392 @@
+// Exploring the directory: by place (state → county → city), on a map, near a
+// point, and the licensed trunked systems no one has shared yet. Sites are
+// where their FCC-licensed transmitters are (place.ts): a system is in every
+// county and city one of its transmitters is in.
+
+import { type Db, type Row, first, marks } from "./db.ts";
+import { distanceKm } from "./geo.ts";
+import { resolve } from "./share.ts";
+
+export const TYPES = ["p25", "smartnet", "dmr", "nxdn", "edacs"] as const;
+/** A system with transmitters in this many counties of a state is listed as regional there, not under each county. */
+export const REGIONAL_COUNTIES = 4;
+/** A system not heard for this long is stale. */
+export const STALE_MS = 30 * 24 * 3600_000;
+
+/** `types=p25,smartnet` → those (unknown ones dropped); none: every type. */
+export function parseTypes(v: string | null): string[] {
+  const t = (v ?? "").split(",").map((x) => x.trim().toLowerCase()).filter((x) => (TYPES as readonly string[]).includes(x));
+  return t.length ? [...new Set(t)] : [...TYPES];
+}
+const typeSql = (types: string[]) => ({ sql: `y.type IN (${marks(types.length)})`, params: types });
+
+export interface SystemSummary {
+  id: string;
+  name: string;
+  type: string;
+  /** Who holds its licenses (the most of its transmitters'). */
+  licensee: string;
+  sites: number;
+  /** Counties its transmitters are in (in the place asked about, when there is one). */
+  counties: number;
+  talkgroupCount: number;
+  lastHeard: number | null;
+  stale: boolean;
+}
+
+async function summaries(db: Db, ids: string[], now: number, countiesIn?: string): Promise<SystemSummary[]> {
+  const out: SystemSummary[] = [];
+  for (let i = 0; i < ids.length; i += 90) {
+    const some = ids.slice(i, i + 90);
+    const rows = await db.all<Row>(
+      `SELECT y.id, y.name, y.type,
+              (SELECT COUNT(*) FROM sites s WHERE s.system_id = y.id AND s.status IN ('heard', 'announced')) AS sites,
+              (SELECT MAX(s.last_heard) FROM sites s WHERE s.system_id = y.id) AS last_heard,
+              (SELECT COUNT(*) FROM talkgroups t WHERE t.system_id = y.id AND t.status IN ('active', 'heard')) AS tgs,
+              (SELECT COUNT(DISTINCT x.county) FROM site_transmitters x JOIN sites s ON s.id = x.site_id WHERE s.system_id = y.id AND x.county != '' ${countiesIn ? "AND x.state = ?" : ""}) AS counties,
+              (SELECT x.licensee FROM site_transmitters x JOIN sites s ON s.id = x.site_id WHERE s.system_id = y.id AND x.licensee != '' GROUP BY x.licensee ORDER BY COUNT(*) DESC LIMIT 1) AS licensee
+         FROM systems y WHERE y.id IN (${marks(some.length)}) AND y.status = 'active'`,
+      countiesIn ? [countiesIn, ...some] : some,
+    );
+    for (const r of rows) {
+      const last = r.last_heard as number | null;
+      out.push({ id: r.id as string, name: r.name as string, type: r.type as string, licensee: (r.licensee as string) ?? "", sites: r.sites as number, counties: r.counties as number, talkgroupCount: r.tgs as number, lastHeard: last, stale: !last || now - last > STALE_MS });
+    }
+  }
+  return out.sort((a, b) => (a.name || a.licensee || a.id).localeCompare(b.name || b.licensee || b.id));
+}
+
+/** Systems with a transmitter where `where` says (SQL on site_transmitters x), of these types. */
+async function systemsWhere(db: Db, where: string, params: unknown[], types: string[]): Promise<string[]> {
+  const t = typeSql(types);
+  const rows = await db.all<{ id: string }>(
+    `SELECT DISTINCT y.id FROM site_transmitters x JOIN sites s ON s.id = x.site_id JOIN systems y ON y.id = s.system_id
+      WHERE ${where} AND y.status = 'active' AND s.status IN ('heard', 'announced') AND ${t.sql}`,
+    [...params, ...t.params],
+  );
+  return rows.map((r) => r.id);
+}
+
+const placeName = (db: Db, geoid: string) => first<Row>(db, "SELECT geoid, kind, state, name, full_name, lat, lon FROM places WHERE geoid = ?", [geoid]);
+
+/** Every state with systems, how many of each type, and how many systems aren't placed yet. */
+export async function states(db: Db, types: string[]) {
+  const t = typeSql(types);
+  const rows = await db.all<{ state: string; type: string; n: number }>(
+    `SELECT x.state, y.type, COUNT(DISTINCT y.id) AS n FROM site_transmitters x JOIN sites s ON s.id = x.site_id JOIN systems y ON y.id = s.system_id
+      WHERE x.state != '' AND y.status = 'active' AND ${t.sql} GROUP BY x.state, y.type`,
+    t.params,
+  );
+  const names = new Map((await db.all<Row>("SELECT geoid, name FROM places WHERE kind = 'state'")).map((r) => [r.geoid as string, r.name as string]));
+  const by = new Map<string, { state: string; name: string; systems: number; byType: Record<string, number> }>();
+  for (const r of rows) {
+    const e = by.get(r.state) ?? { state: r.state, name: names.get(r.state) ?? r.state, systems: 0, byType: {} };
+    e.byType[r.type] = r.n;
+    by.set(r.state, e);
+  }
+  for (const [st, e] of by) e.systems = (await systemsWhere(db, "x.state = ?", [st], types)).length;
+  const unplaced = await first<{ n: number }>(
+    db,
+    `SELECT COUNT(*) AS n FROM systems y WHERE y.status = 'active' AND ${t.sql}
+       AND NOT EXISTS (SELECT 1 FROM sites s JOIN site_transmitters x ON x.site_id = s.id WHERE s.system_id = y.id)`,
+    t.params,
+  );
+  return { states: [...by.values()].sort((a, b) => a.name.localeCompare(b.name)), unplaced: unplaced?.n ?? 0 };
+}
+
+/** A state: its counties with systems, and the regional systems (in many of its counties). */
+export async function state(db: Db, st: string, types: string[], now = Date.now()) {
+  const info = await placeName(db, st);
+  if (!info || info.kind !== "state") return null;
+  const ids = await systemsWhere(db, "x.state = ?", [st], types);
+  const all = await summaries(db, ids, now, st);
+  const regional = all.filter((s) => s.counties >= REGIONAL_COUNTIES);
+  const t = typeSql(types);
+  const counts = await db.all<{ county: string; n: number }>(
+    `SELECT x.county, COUNT(DISTINCT y.id) AS n FROM site_transmitters x JOIN sites s ON s.id = x.site_id JOIN systems y ON y.id = s.system_id
+      WHERE x.state = ? AND x.county != '' AND y.status = 'active' AND ${t.sql} GROUP BY x.county`,
+    [st, ...t.params],
+  );
+  const counties = [];
+  for (const c of counts) {
+    const p = await placeName(db, c.county);
+    counties.push({ geoid: c.county, name: (p?.full_name as string) ?? c.county, systems: c.n });
+  }
+  return { state: st, name: info.name as string, systems: all.length, regional, counties: counties.sort((a, b) => a.name.localeCompare(b.name)) };
+}
+
+/** A county: its systems (regional ones apart), and its cities with systems. */
+export async function county(db: Db, st: string, geoid: string, types: string[], now = Date.now()) {
+  const info = await placeName(db, geoid);
+  if (!info || info.kind !== "county" || info.state !== st) return null;
+  const all = await summaries(db, await systemsWhere(db, "x.county = ?", [geoid], types), now, st);
+  const t = typeSql(types);
+  const counts = await db.all<{ place: string; n: number }>(
+    `SELECT x.place, COUNT(DISTINCT y.id) AS n FROM site_transmitters x JOIN sites s ON s.id = x.site_id JOIN systems y ON y.id = s.system_id
+      WHERE x.county = ? AND x.place != '' AND y.status = 'active' AND ${t.sql} GROUP BY x.place`,
+    [geoid, ...t.params],
+  );
+  const cities = [];
+  for (const c of counts) {
+    const p = await placeName(db, c.place);
+    cities.push({ geoid: c.place, name: (p?.full_name as string) ?? c.place, systems: c.n });
+  }
+  return {
+    state: st, stateName: ((await placeName(db, st))?.name as string) ?? st, geoid, name: info.full_name as string, lat: info.lat, lon: info.lon,
+    systems: all.filter((s) => s.counties < REGIONAL_COUNTIES),
+    regional: all.filter((s) => s.counties >= REGIONAL_COUNTIES),
+    cities: cities.sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+/** A city (Census place): its systems. */
+export async function city(db: Db, st: string, countyId: string, geoid: string, types: string[], now = Date.now()) {
+  const info = await placeName(db, geoid);
+  if (!info || info.kind !== "place" || info.state !== st) return null;
+  const c = await placeName(db, countyId);
+  const all = await summaries(db, await systemsWhere(db, "x.place = ?", [geoid], types), now, st);
+  return {
+    state: st, stateName: ((await placeName(db, st))?.name as string) ?? st, county: countyId, countyName: (c?.full_name as string) ?? countyId, geoid, name: info.full_name as string, lat: info.lat, lon: info.lon,
+    systems: all.filter((s) => s.counties < REGIONAL_COUNTIES),
+    regional: all.filter((s) => s.counties >= REGIONAL_COUNTIES),
+  };
+}
+
+export interface MapSite {
+  site: string;
+  system: string;
+  name: string;
+  type: string;
+  stale: boolean;
+  /** Its transmitters: [lat, lon]. */
+  at: [number, number][];
+}
+
+/** Every placed site, for the map (of these types). */
+export async function mapSites(db: Db, types: string[], now = Date.now()): Promise<MapSite[]> {
+  const t = typeSql(types);
+  const rows = await db.all<Row>(
+    `SELECT s.id AS site, y.id AS system, y.name, y.type, s.last_heard, x.lat, x.lon, x.licensee
+       FROM site_transmitters x JOIN sites s ON s.id = x.site_id JOIN systems y ON y.id = s.system_id
+      WHERE y.status = 'active' AND s.status IN ('heard', 'announced') AND ${t.sql} ORDER BY s.id`,
+    t.params,
+  );
+  const by = new Map<string, MapSite>();
+  for (const r of rows) {
+    let e = by.get(r.site as string);
+    if (!e) {
+      const last = r.last_heard as number | null;
+      e = { site: r.site as string, system: r.system as string, name: (r.name as string) || (r.licensee as string) || "", type: r.type as string, stale: !last || now - last > STALE_MS, at: [] };
+      by.set(e.site, e);
+    }
+    e.at.push([r.lat as number, r.lon as number]);
+  }
+  return [...by.values()];
+}
+
+/** How many systems (of these types) each county has: the map's shading. */
+export async function countyCounts(db: Db, types: string[]): Promise<Record<string, number>> {
+  const t = typeSql(types);
+  const rows = await db.all<{ county: string; n: number }>(
+    `SELECT x.county, COUNT(DISTINCT y.id) AS n FROM site_transmitters x JOIN sites s ON s.id = x.site_id JOIN systems y ON y.id = s.system_id
+      WHERE x.county != '' AND y.status = 'active' AND ${t.sql} GROUP BY x.county`,
+    t.params,
+  );
+  return Object.fromEntries(rows.map((r) => [r.county, r.n]));
+}
+
+export interface Licensed {
+  callSign: string;
+  licensee: string;
+  serviceDesc: string;
+  lat: number;
+  lon: number;
+  stationClass: string;
+  frequencies: number;
+  /** What it likely is, by its licensed emissions (licensedKind). */
+  kind: LicensedKind;
+}
+
+/** What a licensed system likely is: its digital mode, or analog FM (SmartNet, EDACS, LTR: emissions can't tell), or unknown. */
+export type LicensedKind = "p25" | "dmr" | "nxdn" | "analog" | "";
+
+/** Emission designators by what carries them (the bandwidth, then the modulation and what's sent). */
+const KIND_OF: [Exclude<LicensedKind, "">, RegExp][] = [
+  ["p25", /^(8K10F1[EDW]|8K70D1[EDW]|9K80D7[EDW]|9K70D7W)$/], // C4FM, LSM/CQPSK simulcast, Phase 2 H-DQPSK
+  ["dmr", /^7K60FX[EDW]$/],
+  ["nxdn", /^(4K00F1[EDW]|4K00F7W|8K30F1[EDW]|8K30F7W)$/], // 6.25 kHz (dPMR shares it), 12.5 kHz
+  ["analog", /F3E$/], // FM voice
+];
+
+/**
+ * What a licensed system likely is, from its emissions (each frequency's
+ * licensed emissions, comma separated): the digital mode on the most of its
+ * frequencies; else analog FM; else unknown. A license often keeps analog
+ * beside digital, so digital wins.
+ */
+export function licensedKind(emissionsPerFrequency: (string | null)[]): LicensedKind {
+  const n: Record<string, number> = {};
+  for (const e of emissionsPerFrequency) {
+    const kinds = new Set<string>();
+    for (const code of (e ?? "").split(",")) for (const [k, re] of KIND_OF) if (re.test(code.trim().toUpperCase())) kinds.add(k);
+    for (const k of kinds) n[k] = (n[k] ?? 0) + 1;
+  }
+  const digital = (["p25", "dmr", "nxdn"] as const).filter((k) => n[k]).sort((a, b) => n[b] - n[a]);
+  return digital[0] ?? (n.analog ? "analog" : "");
+}
+
+/** Whether the type filter shows a licensed system of this kind (analog under SmartNet or EDACS; unknown only with every type). */
+export function licensedShown(kind: LicensedKind, types: string[]): boolean {
+  if (kind === "analog") return types.includes("smartnet") || types.includes("edacs");
+  return kind ? types.includes(kind) : types.length === TYPES.length;
+}
+
+/**
+ * Every trunked system licensed in the US, for the map's "licensed, not shared
+ * yet" layer: base and repeater stations of the FCC's trunked radio services
+ * (and centralized trunk relays, FB8, of any), one per call sign and spot.
+ * Read once per FCC refresh (scripts/licensed.ts writes it as the site's
+ * files, by 1° cell), never per visit.
+ */
+export async function licensedSpots(fcc: Db): Promise<Licensed[]> {
+  const rows = await fcc.all<Row>(
+    `SELECT t.call_sign, MAX(t.licensee_name) AS licensee, MAX(rs.description) AS service_desc, ROUND(t.lat, 4) AS lat, ROUND(t.lon, 4) AS lon, MAX(t.class_station_code) AS class, COUNT(*) AS n,
+            GROUP_CONCAT(COALESCE(t.emissions, t.emission_designator, ''), ';') AS emissions
+       FROM transmitter t LEFT JOIN radio_service rs ON rs.code = t.radio_service_code
+      WHERE t.class_station_code LIKE 'FB%' AND (rs.description LIKE '%Trunked%' OR t.class_station_code LIKE 'FB8%')
+      GROUP BY t.call_sign, ROUND(t.lat, 4), ROUND(t.lon, 4)`,
+  );
+  return rows.map((r) => ({
+    callSign: r.call_sign as string, licensee: (r.licensee as string) ?? "", serviceDesc: (r.service_desc as string) ?? "", lat: r.lat as number, lon: r.lon as number,
+    stationClass: (r.class as string) ?? "", frequencies: r.n as number, kind: licensedKind(String(r.emissions ?? "").split(";")),
+  }));
+}
+
+/** A licensed spot's file: its 1° cell ("38_-78": the floor of its latitude and longitude). */
+export const licensedCell = (lat: number, lon: number) => `${Math.floor(lat)}_${Math.floor(lon)}`;
+
+/** The call signs shared systems have (theirs are left off the licensed layer). */
+export async function sharedCallSigns(db: Db): Promise<string[]> {
+  const rows = await db.all<{ c: string }>(
+    `SELECT DISTINCT x.call_sign AS c FROM site_transmitters x JOIN sites s ON s.id = x.site_id JOIN systems y ON y.id = s.system_id WHERE y.status = 'active'
+     UNION SELECT l.call_sign FROM fcc_licenses l JOIN systems y ON y.id = l.system_id WHERE y.status = 'active'`,
+  );
+  return rows.map((r) => r.c).sort();
+}
+
+export interface NearSystem extends SystemSummary {
+  /** Its nearest transmitter: how far (km) and which way (degrees). */
+  distanceKm: number;
+  bearingDeg: number;
+  /** Its control channels' band, MHz (the lowest). */
+  bandMhz: number | null;
+  /** Its transmitters in range, for the reception estimate (the page computes it). */
+  transmitters: { lat: number; lon: number; heightM: number | null; erpW: number | null; freqHz: number | null; callSign: string }[];
+}
+
+const bearing = (a: [number, number], b: [number, number]) => {
+  const r = (d: number) => (d * Math.PI) / 180;
+  const y = Math.sin(r(b[1] - a[1])) * Math.cos(r(b[0]));
+  const x = Math.cos(r(a[0])) * Math.sin(r(b[0])) - Math.sin(r(a[0])) * Math.cos(r(b[0])) * Math.cos(r(b[1] - a[1]));
+  return (Math.atan2(y, x) * 180) / Math.PI + 360;
+};
+
+/** Systems with a transmitter within `radiusKm` of a point (of these types), nearest first. */
+export async function nearby(db: Db, at: [number, number], radiusKm: number, types: string[], now = Date.now()): Promise<NearSystem[]> {
+  const dLat = radiusKm / 111;
+  const dLon = radiusKm / (111 * Math.max(0.2, Math.cos((at[0] * Math.PI) / 180)));
+  const t = typeSql(types);
+  const rows = await db.all<Row>(
+    `SELECT y.id AS system, x.lat, x.lon, x.height_m, x.erp_w, x.freq_hz, x.call_sign
+       FROM site_transmitters x JOIN sites s ON s.id = x.site_id JOIN systems y ON y.id = s.system_id
+      WHERE x.lat BETWEEN ? AND ? AND x.lon BETWEEN ? AND ? AND y.status = 'active' AND s.status IN ('heard', 'announced') AND ${t.sql}`,
+    [at[0] - dLat, at[0] + dLat, at[1] - dLon, at[1] + dLon, ...t.params],
+  );
+  const by = new Map<string, { d: number; b: number; tx: NearSystem["transmitters"]; band: number | null }>();
+  for (const r of rows) {
+    const p: [number, number] = [r.lat as number, r.lon as number];
+    const d = distanceKm(at, p);
+    if (d > radiusKm) continue;
+    const sys = await resolve(db, r.system as string);
+    const e = by.get(sys) ?? { d: Infinity, b: 0, tx: [], band: null };
+    if (d < e.d) [e.d, e.b] = [d, bearing(at, p) % 360];
+    const f = r.freq_hz as number | null;
+    if (f && (e.band === null || f / 1e6 < e.band)) e.band = Math.round(f / 1e5) / 10;
+    e.tx.push({ lat: p[0], lon: p[1], heightM: r.height_m as number | null, erpW: r.erp_w as number | null, freqHz: f, callSign: r.call_sign as string });
+    by.set(sys, e);
+  }
+  const sums = await summaries(db, [...by.keys()], now);
+  return sums
+    .map((s) => {
+      const e = by.get(s.id)!;
+      return { ...s, distanceKm: Math.round(e.d * 10) / 10, bearingDeg: Math.round(e.b), bandMhz: e.band, transmitters: e.tx };
+    })
+    .sort((a, b) => a.distanceKm - b.distanceKm);
+}
+
+export interface PlaceHit {
+  geoid: string;
+  kind: "state" | "county" | "place" | "zip";
+  state: string;
+  name: string;
+  /** A point inside it (where the map goes). */
+  lat: number | null;
+  lon: number | null;
+  /** Shared transmitters in it (none counted for a ZIP code). */
+  transmitters: number;
+  /** A place's county (by its transmitters), for its browse link; null without any. */
+  county: string | null;
+}
+
+/**
+ * Places by name, for search: "Arlington", "Arlington, VA", "Springfield,
+ * Illinois", or a ZIP code ("20001"). Counties and cities with shared
+ * systems first, then by name.
+ */
+export async function placesNamed(db: Db, q: string, limit = 10): Promise<PlaceHit[]> {
+  const text = q.trim().replace(/\s+/g, " ");
+  if (/^\d{5}$/.test(text)) {
+    const z = await first<{ lat: number; lon: number }>(db, "SELECT lat, lon FROM zips WHERE zip = ?", [text]);
+    return z ? [{ geoid: text, kind: "zip", state: "", name: `ZIP ${text}`, lat: z.lat, lon: z.lon, transmitters: 0, county: null }] : [];
+  }
+  // "City, ST" or "City, State": the state by its code or its name.
+  let name = text;
+  let state: string | null = null;
+  const m = /^(.+?),\s*([A-Za-z .]+)$/.exec(text);
+  if (m) {
+    const s = m[2].trim();
+    const st = /^[A-Za-z]{2}$/.test(s) ? s.toUpperCase() : ((await first<{ geoid: string }>(db, "SELECT geoid FROM places WHERE kind = 'state' AND name LIKE ?", [s]))?.geoid ?? null);
+    if (st) [name, state] = [m[1].trim(), st];
+  }
+  if (name.length < 3) return [];
+  const rows = await db.all<Row>(
+    `SELECT p.geoid, p.kind, p.state, p.full_name, p.lat, p.lon,
+            (SELECT COUNT(*) FROM site_transmitters x WHERE (p.kind = 'county' AND x.county = p.geoid) OR (p.kind = 'place' AND x.place = p.geoid) OR (p.kind = 'state' AND x.state = p.geoid)) AS n,
+            (SELECT x.county FROM site_transmitters x WHERE p.kind = 'place' AND x.place = p.geoid LIMIT 1) AS county
+       FROM places p WHERE (p.name LIKE ? OR p.full_name LIKE ?) ${state ? "AND p.state = ?" : ""}
+      ORDER BY n DESC, p.kind = 'state' DESC, LENGTH(p.full_name) LIMIT ?`,
+    state ? [`${name}%`, `${name}%`, state, limit] : [`${name}%`, `${name}%`, limit],
+  );
+  return rows.map((r) => ({ geoid: r.geoid as string, kind: r.kind as PlaceHit["kind"], state: r.state as string, name: r.full_name as string, lat: r.lat as number | null, lon: r.lon as number | null, transmitters: r.n as number, county: (r.county as string) ?? null }));
+}
+
+/** Where a system is: its sites' licensed transmitters (and the places they're in), and how placing each site went. */
+export async function where(db: Db, systemId: string) {
+  const tx = await db.all<Row>(
+    `SELECT x.site_id, x.call_sign, x.licensee, x.lat, x.lon, x.height_m, x.erp_w, x.freq_hz, x.state, x.county, x.place,
+            c.full_name AS county_name, p.full_name AS place_name
+       FROM site_transmitters x JOIN sites s ON s.id = x.site_id
+       LEFT JOIN places c ON c.geoid = x.county LEFT JOIN places p ON p.geoid = x.place
+      WHERE s.system_id = ? AND s.status IN ('heard', 'announced') ORDER BY x.site_id, x.lat`,
+    [systemId],
+  );
+  const placements = await db.all<Row>("SELECT p.site_id, p.method, p.note, p.at FROM placements p JOIN sites s ON s.id = p.site_id WHERE s.system_id = ?", [systemId]);
+  return {
+    transmitters: tx.map((t) => ({
+      site: t.site_id as string, callSign: t.call_sign as string, licensee: t.licensee as string, lat: t.lat as number, lon: t.lon as number,
+      heightM: t.height_m as number | null, erpW: t.erp_w as number | null, freqHz: t.freq_hz as number | null,
+      state: t.state as string, county: t.county as string, countyName: (t.county_name as string) ?? "", place: t.place as string, placeName: (t.place_name as string) ?? "",
+    })),
+    placements: placements.map((p) => ({ site: p.site_id as string, method: p.method as string, note: p.note as string, at: p.at as number })),
+  };
+}
