@@ -90,7 +90,9 @@ and again against one database.
 
 ## The API
 
-All under `/directory/api/v1`. The exploring reads take `types=p25,smartnet,…` (default: every type). Reads are open. A share needs no account: it carries the install's anonymous recorder ID,
+All under `/directory/api/v1`. The exploring reads take `types=p25,smartnet,…` (default: every type). Every read is kept at the edge for a day under the directory's data version (its newest
+revision, share and placement: three rows read per request), so a change shows at once and an unchanged answer
+costs no D1 reads. Reads are open. A share needs no account: it carries the install's anonymous recorder ID,
 and is rate-limited. Stewards' and admins' actions need `ADMIN_TOKEN` (bearer) until there are accounts.
 
 | | |
@@ -103,7 +105,7 @@ and is rate-limited. Stewards' and admins' actions need `ADMIN_TOKEN` (bearer) u
 | `GET /search?q=[&system=&types=]` | By frequency (`857.9875`), call sign, identity (`BEE00.3A9`), talkgroup number in a system, or words (names, licensees); and `places` by name |
 | `GET /places`, `/places/{ST}`, `/places/{ST}/{county}`, `/places/{ST}/{county}/{place}` | By place: states with counts by type; a state's counties and regional systems; a county's systems and cities; a city's systems (Census GEOIDs) |
 | `GET /map/sites`, `GET /map/counties` | Every placed site with its transmitters; each county's count of systems |
-| `GET /map/licensed?bbox=w,s,e,n` | Trunked base stations licensed in a box (5° at most) whose call signs no shared system has |
+| `GET /map/callsigns` | The call signs shared systems have (the map leaves them off its licensed layer, which is the site's files: `/directory/geo/licensed/`) |
 | `GET /nearby?lat=&lon=[&coarse=1]&radiusKm=` (or `cell=`) | Systems with a transmitter in range, nearest first, with their transmitters (power, height, frequency) |
 | `GET /identify?claim=p25:bee00.3a9/1.5` | What an identity heard on the air is |
 | `POST /observations` | A share from TRP (`src/observation.ts`) |
@@ -132,6 +134,7 @@ npm run deploy:production    # checks and staging's end-to-end tests, then produ
 |---|---|---|---|
 | Counties and Census places (2024 cartographic boundaries) and the `places` table | `node scripts/geo.ts` | `.cache/geo/out/` | the site's files (`/directory/geo/`), D1 |
 | Label fonts (Protomaps' Noto Sans glyphs) | `node scripts/maps.ts fonts` | `.cache/maps/fonts/` | the site's files (`/directory/fonts/`) |
+| The licensed layer: every trunked system licensed in the US, by 1° cell (51,649 spots) | `node scripts/licensed.ts <ArgusRF's spectrum.db>`, per FCC refresh | `.cache/geo/out/geo/licensed/` | the site's files (`/directory/geo/licensed/`) |
 | The basemap: Protomaps' OpenStreetMap build, the US to zoom 12 (2.1 GB) | `node scripts/maps.ts extract` (needs `pmtiles`) | `.cache/maps/us.pmtiles` | R2 `trp-directory-maps` (`/directory/tiles/`), one bucket for both |
 
 The deploy script makes the boundaries and fonts if they're missing, and loads the `places` table when it changed.

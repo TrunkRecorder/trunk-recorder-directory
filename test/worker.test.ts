@@ -15,6 +15,7 @@ function fakeD1(db: Db = sqlite()) {
     params,
     bind: (...p: unknown[]) => stmt(sql, p),
     all: async () => ({ results: await db.all(sql, params) }),
+    first: async () => (await db.all(sql, params))[0] ?? null,
   });
   return {
     raw: db,
@@ -120,4 +121,34 @@ test("an FCC database failure is a JSON 500", async () => {
   const r = await get(e, "/api/v1/fcc/meta");
   assert.equal(r.status, 500);
   assert.equal(((await r.json()) as any).error, "argus is down");
+});
+
+test("API reads are kept at the edge until the data changes: a share answers anew", async () => {
+  const store = new Map<string, Response>();
+  const g = globalThis as unknown as { caches?: unknown };
+  g.caches = { default: { match: async (r: Request) => store.get(r.url)?.clone(), put: async (r: Request, res: Response) => void store.set(r.url, res) } };
+  try {
+    const { e } = env();
+    const waits: Promise<unknown>[] = [];
+    const ctx = { waitUntil: (p: Promise<unknown>) => void waits.push(p) } as unknown as ExecutionContext;
+    const read = async () => {
+      const r = await worker.fetch(new Request("https://trunkrecorder.pro/directory/api/v1/meta"), e, ctx);
+      await Promise.all(waits);
+      return ((await r.json()) as any).systems;
+    };
+    assert.equal(await read(), 0);
+    assert.equal(store.size, 1, "kept");
+    assert.ok([...store.values()][0].headers.get("cache-control")!.includes("max-age=86400"));
+    assert.equal(await read(), 0, "from the cache");
+    await worker.fetch(new Request("https://trunkrecorder.pro/directory/api/v1/observations", { method: "POST", body: JSON.stringify(obs(recorder(), [p25Site(1, 1, 851e6)])) }), e, ctx);
+    assert.equal(await read(), 1, "a share changes the version: answered anew");
+    assert.equal(store.size, 2);
+    // Errors and moderation's views aren't kept.
+    await worker.fetch(new Request("https://trunkrecorder.pro/directory/api/v1/systems/sys_nope"), e, ctx);
+    await worker.fetch(new Request("https://trunkrecorder.pro/directory/api/v1/merge-proposals"), e, ctx);
+    await Promise.all(waits);
+    assert.equal(store.size, 2);
+  } finally {
+    delete g.caches;
+  }
 });

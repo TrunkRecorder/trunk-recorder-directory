@@ -51,22 +51,43 @@ export function MapPage(props: { query: URLSearchParams }) {
     get<{ counties: Record<string, number> }>(`/map/counties${t ? `?${t}` : ""}`).then((r) => setCounties(r.counties), () => {});
   }, [types.join(",")]);
 
-  const loadLicensed = () => {
+  // The licensed layer: the site's files by 1° cell (made per FCC refresh), the shared call signs left out.
+  const cellCache = useRef(new Map<string, Promise<Licensed[]>>());
+  const known = useRef<{ cells: Set<string>; shared: Set<string> } | null>(null);
+  const loadLicensed = async () => {
     const b = bounds.current;
     if (!showLicensed || !b) return setLicensed([]);
     if (zoom.current < LICENSED_ZOOM) {
       setLicensed([]);
       return setLicensedNote("Zoom in (to a few counties) to see licensed systems.");
     }
-    get<{ licensed: Licensed[]; tooBig?: boolean }>(`/map/licensed?bbox=${b.map((v) => v.toFixed(3)).join(",")}`).then(
-      (r) => {
-        setLicensed(r.licensed);
-        setLicensedNote(r.tooBig ? "Zoom in (to a few counties) to see licensed systems." : null);
-      },
-      () => setLicensedNote("Licensed systems aren't available right now."),
-    );
+    try {
+      known.current ??= await Promise.all([
+        fetch("/directory/geo/licensed/index.json").then((r) => (r.ok ? r.json() : { cells: [] })) as Promise<{ cells: string[] }>,
+        get<{ callSigns: string[] }>("/map/callsigns"),
+      ]).then(([i, c]) => ({ cells: new Set(i.cells), shared: new Set(c.callSigns) }));
+      const k = known.current!;
+      const want: string[] = [];
+      for (let lat = Math.floor(b[1]); lat <= Math.floor(b[3]); lat++) for (let lon = Math.floor(b[0]); lon <= Math.floor(b[2]); lon++) if (k.cells.has(`${lat}_${lon}`)) want.push(`${lat}_${lon}`);
+      const got = await Promise.all(
+        want.slice(0, 40).map((c) => {
+          let p = cellCache.current.get(c);
+          if (!p) {
+            p = fetch(`/directory/geo/licensed/${c}.json`).then((r) => r.json() as Promise<{ spots: [string, string, string, number, number, string, number][] }>).then((j: { spots: [string, string, string, number, number, string, number][] }) =>
+              j.spots.map(([callSign, licensee, serviceDesc, lat, lon, stationClass, frequencies]) => ({ callSign, licensee, serviceDesc, lat, lon, stationClass, frequencies })),
+            );
+            cellCache.current.set(c, p);
+          }
+          return p;
+        }),
+      );
+      setLicensed(got.flat().filter((l) => !k.shared.has(l.callSign) && l.lat >= b[1] && l.lat <= b[3] && l.lon >= b[0] && l.lon <= b[2]));
+      setLicensedNote(k.cells.size ? null : "Licensed systems aren't available right now.");
+    } catch {
+      setLicensedNote("Licensed systems aren't available right now.");
+    }
   };
-  useEffect(loadLicensed, [showLicensed]);
+  useEffect(() => void loadLicensed(), [showLicensed]);
   useEffect(() => {
     if (showLicensed && view.zoom < LICENSED_ZOOM) setLicensedNote("Zoom in (to a few counties) to see licensed systems.");
   }, [showLicensed]);
@@ -80,7 +101,7 @@ export function MapPage(props: { query: URLSearchParams }) {
     bounds.current = b;
     zoom.current = v.zoom;
     set({ at: `${v.center[0]},${v.center[1]}`, z: String(v.zoom) });
-    loadLicensed();
+    void loadLicensed();
   };
   const onPick = (p: Picked) => {
     if (p.kind === "county") go(withQuery(`/browse/${p.props.state}/${p.props.geoid}`, new URLSearchParams(typesValue(types) ? { types: typesValue(types)! } : {}), {}));

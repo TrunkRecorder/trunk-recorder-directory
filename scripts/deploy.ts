@@ -52,6 +52,12 @@ function writeDeployEnv(v: Record<string, string>) {
 // 1. The map's data (made once, kept in .cache/), then the checks.
 if (!existsSync(join(ROOT, ".cache/geo/out/geo/counties.json"))) sh("node", ["scripts/geo.ts"]);
 if (!existsSync(join(ROOT, ".cache/maps/fonts/Noto Sans Regular/0-255.pbf"))) sh("node", ["scripts/maps.ts", "fonts"]);
+// The licensed layer, from an ArgusRF build (made per FCC refresh: node scripts/licensed.ts <its spectrum.db>).
+if (!existsSync(join(ROOT, ".cache/geo/out/geo/licensed/index.json"))) {
+  const fcc = process.env.FCC_DB_PATH ?? join(ROOT, "..", "argusrf", "build", "spectrum.db");
+  if (existsSync(fcc)) sh("node", ["scripts/licensed.ts", fcc]);
+  else console.warn(`(no ${fcc}: the map's licensed layer isn't in this build — node scripts/licensed.ts <ArgusRF's spectrum.db>)`);
+}
 sh("npx", ["tsc", "--noEmit"]);
 sh("node", ["--test", "test/*.test.ts"]);
 sh("npx", ["vite", "build", "--logLevel", "warn"]);

@@ -24,6 +24,50 @@ export interface Env {
   MAPS?: R2Bucket;
 }
 
+/** How long an API answer is kept at the edge: as long as the data it's from hasn't changed (see dataVersion). */
+const API_TTL_S = 86_400;
+
+/**
+ * The directory's data version: its newest revision, share and placement (each
+ * the last row of its table: three rows read). Every write moves one, so an
+ * answer cached under the version it was made at is never stale.
+ */
+async function dataVersion(db: D1Database): Promise<string | null> {
+  try {
+    const r = await db
+      .prepare("SELECT (SELECT seq FROM sqlite_sequence WHERE name = 'revisions') AS r, (SELECT MAX(rowid) FROM observations) AS o, (SELECT MAX(rowid) FROM placements) AS p")
+      .first<{ r: number | null; o: number | null; p: number | null }>();
+    return r ? `${r.r ?? 0}.${r.o ?? 0}.${r.p ?? 0}` : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A read of the API, from the edge cache when the data hasn't changed since it was answered. */
+async function cachedRead(req: Request, env: Env, ctx: ExecutionContext | undefined, answer: () => Promise<Response>): Promise<Response> {
+  const cache = typeof caches !== "undefined" ? (caches as unknown as { default: Cache }).default : null;
+  if (req.method !== "GET" || !cache) return answer();
+  const v = await dataVersion(env.DB);
+  if (!v) return answer();
+  const u = new URL(req.url);
+  u.searchParams.set("_v", v);
+  const key = new Request(u.toString());
+  const hit = await cache.match(key);
+  if (hit) {
+    const r = new Response(hit.body, hit);
+    r.headers.set("cache-control", "public, max-age=60");
+    r.headers.set("x-directory-cache", "hit");
+    return r;
+  }
+  const res = await answer();
+  // (Only what may be kept: not errors, nor moderation's no-store views.)
+  if (res.status !== 200 || !/public/.test(res.headers.get("cache-control") ?? "")) return res;
+  const kept = new Response(res.clone().body, { status: 200, headers: new Headers(res.headers) });
+  kept.headers.set("cache-control", `public, max-age=${API_TTL_S}`);
+  ctx?.waitUntil(cache.put(key, kept));
+  return res;
+}
+
 /** The Census boundaries, from this Worker's own files (scripts/geo.ts), kept while it runs. */
 let places: { assets: Fetcher; p: Places } | null = null;
 const placesOf = (assets: Fetcher) => {
@@ -64,7 +108,7 @@ export default {
         if (!(await env.SHARE_LIMIT.limit({ key: `ip:${ip}` })).success) return json({ error: "too many shares for now: try again in a minute" }, 429);
       }
       try {
-        return await handle(
+        return await cachedRead(req, env, ctx, () => handle(
           {
             db: d1(env.DB),
             putObservation: async (key, body) => void (await env.OBSERVATIONS.put(key, body, { httpMetadata: { contentType: "application/json" } })),
@@ -73,7 +117,7 @@ export default {
             places: placesOf(env.ASSETS),
           },
           req,
-        );
+        ));
       } catch (e) {
         return json({ error: e instanceof Error ? e.message : String(e) }, 500);
       }

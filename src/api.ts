@@ -11,7 +11,7 @@ import { keeper, mergeSystems } from "./merge.ts";
 import { NameIndex } from "./names.ts";
 import { Invalid, parseObservation } from "./observation.ts";
 import { changeset, diff, getSystem, getTalkgroups, history, near, search, talkgroupsCsv, trpSystem } from "./read.ts";
-import { city, county, countyCounts, LICENSED_MAX_DEG, licensed, mapSites, nearby, parseTypes, placesNamed, state, states, where } from "./explore.ts";
+import { city, county, countyCounts, mapSites, nearby, parseTypes, placesNamed, sharedCallSigns, state, states, where } from "./explore.ts";
 import { cellCenter, validCell } from "./geo.ts";
 import { placeSystem } from "./place.ts";
 import type { Places } from "./places.ts";
@@ -177,16 +177,10 @@ export async function handle(env: Env, req: Request): Promise<Response> {
         const c = await city(db, r[1], r[2], r[3], types);
         return c ? json(c) : err(404, "no such city");
       }
-      if (path === "/map/sites") return json({ sites: await mapSites(db, types) }, 200, { "cache-control": "public, max-age=300" });
-      if (path === "/map/counties") return json({ counties: await countyCounts(db, types) }, 200, { "cache-control": "public, max-age=300" });
-      if (path === "/map/licensed") {
-        if (!env.fcc) return json({ licensed: [] });
-        const b = (q.get("bbox") ?? "").split(",").map(Number);
-        if (b.length !== 4 || b.some((v) => !Number.isFinite(v))) return err(400, "bbox is west,south,east,north");
-        const [west, south, east, north] = b;
-        if (east - west > LICENSED_MAX_DEG || north - south > LICENSED_MAX_DEG || east <= west || north <= south) return json({ licensed: [], tooBig: true });
-        return json({ licensed: await licensed(db, env.fcc, { west, south, east, north }) }, 200, { "cache-control": "public, max-age=3600" });
-      }
+      if (path === "/map/sites") return json({ sites: await mapSites(db, types) });
+      if (path === "/map/counties") return json({ counties: await countyCounts(db, types) });
+      // (The licensed layer itself is the site's files, by 1° cell: scripts/licensed.ts.)
+      if (path === "/map/callsigns") return json({ callSigns: await sharedCallSigns(db) });
       if (path === "/nearby") {
         // A coarse cell (what the page sends: ~3 km), or a point.
         const cell = validCell(q.get("cell"));

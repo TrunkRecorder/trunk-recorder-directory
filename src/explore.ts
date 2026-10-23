@@ -195,13 +195,9 @@ export async function countyCounts(db: Db, types: string[]): Promise<Record<stri
   return Object.fromEntries(rows.map((r) => [r.county, r.n]));
 }
 
-/** The largest box the licensed layer answers for (degrees), so a request stays one index range. */
-export const LICENSED_MAX_DEG = 5;
-
 export interface Licensed {
   callSign: string;
   licensee: string;
-  service: string;
   serviceDesc: string;
   lat: number;
   lon: number;
@@ -210,34 +206,32 @@ export interface Licensed {
 }
 
 /**
- * Trunked systems licensed in a box that no one has shared: base and repeater
- * stations of the FCC's trunked radio services (and centralized trunk relays,
- * FB8, of any), one per call sign and spot, leaving out call signs the
- * directory already has.
+ * Every trunked system licensed in the US, for the map's "licensed, not shared
+ * yet" layer: base and repeater stations of the FCC's trunked radio services
+ * (and centralized trunk relays, FB8, of any), one per call sign and spot.
+ * Read once per FCC refresh (scripts/licensed.ts writes it as the site's
+ * files, by 1° cell), never per visit.
  */
-export async function licensed(db: Db, fcc: Db, box: { west: number; south: number; east: number; north: number }, limit = 2000): Promise<Licensed[]> {
+export async function licensedSpots(fcc: Db): Promise<Licensed[]> {
   const rows = await fcc.all<Row>(
-    `SELECT t.call_sign, t.licensee_name, t.radio_service_code, rs.description AS service_desc, ROUND(t.lat, 4) AS lat, ROUND(t.lon, 4) AS lon, MAX(t.class_station_code) AS class, COUNT(*) AS n
+    `SELECT t.call_sign, MAX(t.licensee_name) AS licensee, MAX(rs.description) AS service_desc, ROUND(t.lat, 4) AS lat, ROUND(t.lon, 4) AS lon, MAX(t.class_station_code) AS class, COUNT(*) AS n
        FROM transmitter t LEFT JOIN radio_service rs ON rs.code = t.radio_service_code
-      WHERE t.lat BETWEEN ? AND ? AND t.lon BETWEEN ? AND ? AND t.license_status = 'A' AND t.class_station_code LIKE 'FB%'
-        AND (rs.description LIKE '%Trunked%' OR t.class_station_code LIKE 'FB8%')
-      GROUP BY t.call_sign, ROUND(t.lat, 4), ROUND(t.lon, 4) LIMIT ?`,
-    [box.south, box.north, box.west, box.east, limit],
+      WHERE t.class_station_code LIKE 'FB%' AND (rs.description LIKE '%Trunked%' OR t.class_station_code LIKE 'FB8%')
+      GROUP BY t.call_sign, ROUND(t.lat, 4), ROUND(t.lon, 4)`,
   );
-  const calls = [...new Set(rows.map((r) => r.call_sign as string))];
-  const known = new Set<string>();
-  // (45 at a time: twice in one statement, under D1's 100 parameters.)
-  for (let i = 0; i < calls.length; i += 45) {
-    const some = calls.slice(i, i + 45);
-    for (const r of await db.all<{ c: string }>(
-      `SELECT x.call_sign AS c FROM site_transmitters x JOIN sites s ON s.id = x.site_id JOIN systems y ON y.id = s.system_id WHERE x.call_sign IN (${marks(some.length)}) AND y.status = 'active'
-       UNION SELECT l.call_sign FROM fcc_licenses l JOIN systems y ON y.id = l.system_id WHERE l.call_sign IN (${marks(some.length)}) AND y.status = 'active'`,
-      [...some, ...some],
-    )) known.add(r.c);
-  }
-  return rows
-    .filter((r) => !known.has(r.call_sign as string))
-    .map((r) => ({ callSign: r.call_sign as string, licensee: (r.licensee_name as string) ?? "", service: (r.radio_service_code as string) ?? "", serviceDesc: (r.service_desc as string) ?? "", lat: r.lat as number, lon: r.lon as number, stationClass: (r.class as string) ?? "", frequencies: r.n as number }));
+  return rows.map((r) => ({ callSign: r.call_sign as string, licensee: (r.licensee as string) ?? "", serviceDesc: (r.service_desc as string) ?? "", lat: r.lat as number, lon: r.lon as number, stationClass: (r.class as string) ?? "", frequencies: r.n as number }));
+}
+
+/** A licensed spot's file: its 1° cell ("38_-78": the floor of its latitude and longitude). */
+export const licensedCell = (lat: number, lon: number) => `${Math.floor(lat)}_${Math.floor(lon)}`;
+
+/** The call signs shared systems have (theirs are left off the licensed layer). */
+export async function sharedCallSigns(db: Db): Promise<string[]> {
+  const rows = await db.all<{ c: string }>(
+    `SELECT DISTINCT x.call_sign AS c FROM site_transmitters x JOIN sites s ON s.id = x.site_id JOIN systems y ON y.id = s.system_id WHERE y.status = 'active'
+     UNION SELECT l.call_sign FROM fcc_licenses l JOIN systems y ON y.id = l.system_id WHERE y.status = 'active'`,
+  );
+  return rows.map((r) => r.c).sort();
 }
 
 export interface NearSystem extends SystemSummary {

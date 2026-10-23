@@ -1,5 +1,5 @@
 -- ArgusRF's FCC ULS database (the D1 database `argus`), as its ingest builds it:
--- copied from robotastic/argusrf ingest/src/db.ts (SCHEMA + INDEXES) at 03ea815.
+-- copied from robotastic/argusrf ingest/src/db.ts (SCHEMA + INDEXES) at c07b841.
 -- The FCC lookup reads it; tests and local runs build a small one from this.
 -- If ArgusRF changes its schema, copy it again (test/fcc.test.ts checks the columns the lookup reads).
 
@@ -163,7 +163,9 @@ CREATE TABLE radio_service (
 CREATE INDEX idx_tx_lower  ON transmitter(freq_lower_hz, freq_upper_hz);
 CREATE INDEX idx_tx_center ON transmitter(freq_center_hz);
 CREATE INDEX idx_tx_call   ON transmitter(call_sign);
-CREATE INDEX idx_tx_status ON transmitter(license_status);
+-- (No index on license_status: every row here is 'A', and D1 keeps no
+-- statistics, so its planner took that index for any query naming the status
+-- and read the whole table. Queries write +license_status besides.)
 -- Spatial filtering rides along on the frequency scan; this only helps the
 -- "what is near me on any frequency" case.
 CREATE INDEX idx_tx_latlon ON transmitter(lat, lon);

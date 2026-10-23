@@ -269,14 +269,12 @@ describe("exploring", () => {
     const near = await call("GET", "/nearby?lat=38.90&lon=-77.04&coarse=1&radiusKm=25");
     assert.equal(near.status, 200);
     assert.ok(Array.isArray(near.json.systems));
-    assert.equal((await call("GET", "/map/licensed?bbox=-80,35,-70,45")).json.tooBig, true);
   });
 
-  test("licensed, not shared: trunked base stations in central Washington", async () => {
-    const r = await call("GET", "/map/licensed?bbox=-77.15,38.8,-76.9,39.0");
+  test("the call signs shared systems have (left off the licensed layer)", async () => {
+    const r = await call("GET", "/map/callsigns");
     assert.equal(r.status, 200);
-    assert.ok(r.json.licensed.length > 0);
-    assert.ok(r.json.licensed.every((x: any) => x.stationClass.startsWith("FB")));
+    assert.ok(Array.isArray(r.json.callSigns));
   });
 
   test("the map's files: boundaries, fonts, basemap", { skip: !MAPS && "a local build has no basemap" }, async () => {
@@ -284,6 +282,11 @@ describe("exploring", () => {
     assert.equal(c.status, 200);
     assert.ok(((await c.json()) as any).features.length > 3000);
     assert.equal((await fetch(`${BASE}/directory/geo/states/DC.json`)).status, 200);
+    // The licensed layer: Washington's cell has DC's licenses.
+    const li = (await (await fetch(`${BASE}/directory/geo/licensed/index.json`)).json()) as any;
+    assert.ok(li.cells.includes("38_-78") && li.fccData);
+    const cell = (await (await fetch(`${BASE}/directory/geo/licensed/38_-78.json`)).json()) as any;
+    assert.ok(cell.spots.some((x: unknown[]) => x[0] === "WPXT459"));
     assert.equal((await fetch(`${BASE}/directory/fonts/Noto%20Sans%20Regular/0-255.pbf`)).status, 200);
     const tj = await fetch(`${BASE}/directory/tiles/us.json`);
     assert.equal(tj.status, 200);

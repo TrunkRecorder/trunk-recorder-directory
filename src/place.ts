@@ -57,7 +57,8 @@ interface FccRow {
 }
 
 const COLS = "call_sign, licensee_name, freq_center_hz, lat, lon, structure_height_m, power_erp_w, class_station_code, location_state";
-const BASE = "class_station_code LIKE 'FB%' AND license_status = 'A'";
+// (`+`: never by a status index; on D1, with no statistics, one read the whole table.)
+const BASE = "class_station_code LIKE 'FB%' AND +license_status = 'A'";
 
 /**
  * The licensed spots that are a site's transmitters: from these FCC rows, each

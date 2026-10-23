@@ -4,7 +4,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { latLngToCell } from "h3-js";
-import { parseTypes } from "../src/explore.ts";
+import { licensedCell, licensedSpots, parseTypes } from "../src/explore.ts";
+import { fccSqlite } from "../src/sqlite.ts";
 import { directory, obs, p25Site, recorder } from "./helpers.ts";
 
 const dcfd = () =>
@@ -84,15 +85,18 @@ test("near a point: systems with a transmitter in range, nearest first, with the
   assert.equal((await d.get("/nearby")).status, 400);
 });
 
-test("licensed, not shared: trunked base stations in a box, without the call signs the directory has", async () => {
+test("licensed, not shared: every trunked base station licensed, by spot; and the call signs shared systems have", async () => {
   const { d } = await twoSystems();
-  const r = (await d.get("/map/licensed?bbox=-77.15,38.8,-76.9,39.0")).json.licensed;
-  assert.ok(r.length > 0);
-  assert.ok(!r.some((x: any) => ["KNJE616", "WPXT459", "WPVX365"].includes(x.callSign)), "shared ones left out");
-  assert.ok(r.every((x: any) => x.stationClass.startsWith("FB")));
-  assert.ok(r.every((x: any) => /Trunked/.test(x.serviceDesc) || x.stationClass.startsWith("FB8")), JSON.stringify(r.slice(0, 3)));
-  assert.equal((await d.get("/map/licensed?bbox=-80,35,-70,45")).json.tooBig, true);
-  assert.equal((await d.get("/map/licensed?bbox=nope")).status, 400);
+  const all = await licensedSpots(fccSqlite());
+  assert.ok(all.length > 50);
+  assert.ok(all.every((x) => x.stationClass.startsWith("FB") && (/Trunked/.test(x.serviceDesc) || x.stationClass.startsWith("FB8"))), JSON.stringify(all.slice(0, 2)));
+  assert.equal(new Set(all.map((x) => `${x.callSign}|${x.lat}|${x.lon}`)).size, all.length, "each call sign once per spot");
+  assert.equal(licensedCell(38.9, -77.03), "38_-78");
+  const shared = (await d.get("/map/callsigns")).json.callSigns;
+  assert.ok(shared.includes("KNJE616") && shared.some((c: string) => c.startsWith("WPVX")), JSON.stringify(shared));
+  // What the map shows, near DC: licensed spots no shared system has.
+  const left = all.filter((x) => !shared.includes(x.callSign));
+  assert.ok(left.length > 0 && left.length < all.length);
 });
 
 test("search: by licensee, call sign and place name; filtered by type", async () => {
