@@ -14,6 +14,20 @@ import assert from "node:assert/strict";
 import { after, describe, test } from "node:test";
 import { latLngToCell } from "h3-js";
 
+// A request that fails before it's answered (a connect timeout from a CI
+// runner, a reset) is tried again, twice; an answer, whatever its status, isn't.
+const fetchOnce = globalThis.fetch;
+globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fetchOnce(input, init);
+    } catch (e) {
+      if (attempt === 3 || !(e instanceof TypeError)) throw e;
+      await new Promise((r) => setTimeout(r, 2000 * attempt));
+    }
+  }
+};
+
 const BASE = (process.env.E2E_BASE_URL ?? "").replace(/\/+$/, "");
 const WRITE = process.env.E2E_WRITE === "1";
 const TOKEN = process.env.E2E_ADMIN_TOKEN ?? "";
