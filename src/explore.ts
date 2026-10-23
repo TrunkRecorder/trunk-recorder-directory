@@ -284,18 +284,50 @@ export async function nearby(db: Db, at: [number, number], radiusKm: number, typ
     .sort((a, b) => a.distanceKm - b.distanceKm);
 }
 
-/** Places by name (for search): counties and cities first by how many systems they have, then by name. */
-export async function placesNamed(db: Db, q: string, limit = 10) {
-  const text = q.trim();
-  if (text.length < 3) return [];
+export interface PlaceHit {
+  geoid: string;
+  kind: "state" | "county" | "place" | "zip";
+  state: string;
+  name: string;
+  /** A point inside it (where the map goes). */
+  lat: number | null;
+  lon: number | null;
+  /** Shared transmitters in it (none counted for a ZIP code). */
+  transmitters: number;
+  /** A place's county (by its transmitters), for its browse link; null without any. */
+  county: string | null;
+}
+
+/**
+ * Places by name, for search: "Arlington", "Arlington, VA", "Springfield,
+ * Illinois", or a ZIP code ("20001"). Counties and cities with shared
+ * systems first, then by name.
+ */
+export async function placesNamed(db: Db, q: string, limit = 10): Promise<PlaceHit[]> {
+  const text = q.trim().replace(/\s+/g, " ");
+  if (/^\d{5}$/.test(text)) {
+    const z = await first<{ lat: number; lon: number }>(db, "SELECT lat, lon FROM zips WHERE zip = ?", [text]);
+    return z ? [{ geoid: text, kind: "zip", state: "", name: `ZIP ${text}`, lat: z.lat, lon: z.lon, transmitters: 0, county: null }] : [];
+  }
+  // "City, ST" or "City, State": the state by its code or its name.
+  let name = text;
+  let state: string | null = null;
+  const m = /^(.+?),\s*([A-Za-z .]+)$/.exec(text);
+  if (m) {
+    const s = m[2].trim();
+    const st = /^[A-Za-z]{2}$/.test(s) ? s.toUpperCase() : ((await first<{ geoid: string }>(db, "SELECT geoid FROM places WHERE kind = 'state' AND name LIKE ?", [s]))?.geoid ?? null);
+    if (st) [name, state] = [m[1].trim(), st];
+  }
+  if (name.length < 3) return [];
   const rows = await db.all<Row>(
-    `SELECT p.geoid, p.kind, p.state, p.full_name,
+    `SELECT p.geoid, p.kind, p.state, p.full_name, p.lat, p.lon,
             (SELECT COUNT(*) FROM site_transmitters x WHERE (p.kind = 'county' AND x.county = p.geoid) OR (p.kind = 'place' AND x.place = p.geoid) OR (p.kind = 'state' AND x.state = p.geoid)) AS n,
             (SELECT x.county FROM site_transmitters x WHERE p.kind = 'place' AND x.place = p.geoid LIMIT 1) AS county
-       FROM places p WHERE p.name LIKE ? OR p.full_name LIKE ? ORDER BY n DESC, LENGTH(p.full_name) LIMIT ?`,
-    [`${text}%`, `${text}%`, limit],
+       FROM places p WHERE (p.name LIKE ? OR p.full_name LIKE ?) ${state ? "AND p.state = ?" : ""}
+      ORDER BY n DESC, p.kind = 'state' DESC, LENGTH(p.full_name) LIMIT ?`,
+    state ? [`${name}%`, `${name}%`, state, limit] : [`${name}%`, `${name}%`, limit],
   );
-  return rows.map((r) => ({ geoid: r.geoid as string, kind: r.kind as string, state: r.state as string, name: r.full_name as string, transmitters: r.n as number, county: (r.county as string) ?? null }));
+  return rows.map((r) => ({ geoid: r.geoid as string, kind: r.kind as PlaceHit["kind"], state: r.state as string, name: r.full_name as string, lat: r.lat as number | null, lon: r.lon as number | null, transmitters: r.n as number, county: (r.county as string) ?? null }));
 }
 
 /** Where a system is: its sites' licensed transmitters (and the places they're in), and how placing each site went. */

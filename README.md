@@ -21,8 +21,9 @@ add a system to Trunk Recorder Pro from it.
     included).
 - **Where systems are comes from their licenses:** each site's transmitters are the FCC-licensed base and repeater
   stations on its frequencies, found by the call signs it sends on the air, or by its frequencies when it sends none.
-  Census boundaries put each one in a state, county and city, so the directory can be browsed by place, mapped, and
-  asked "what can I hear from here?" (with a rough reception estimate from each transmitter's power and height).
+  Census boundaries put each one in a state, county and city, so the directory can be browsed by place, and the map
+  (the home page) answers "what's here?" and, with your location (yours, a city, a ZIP code), "what can I hear from
+  here?" (with a rough reception estimate from each transmitter's power and height).
 - **Partial views add up:**
   - a share is matched site first, so recorders hearing different sites of a statewide system build one system;
   - two records found to be one system (by their identity, or by one announcing the other's site) are merged, and
@@ -102,7 +103,7 @@ and is rate-limited. Stewards' and admins' actions need `ADMIN_TOKEN` (bearer) u
 | `GET /systems/{id}/talkgroups[.csv][?rev=&sites=]` | Its talkgroups, with where each is heard and the other names people gave; `sites=`: what's heard there |
 | `GET /systems/{id}/config[?sites=]` | Ready for TRP: its `System` (with `directory: {id, rev}`) and talkgroup CSV |
 | `GET /systems/{id}/history`, `GET /systems/{id}/diff?from=&to=`, `GET /changesets/{id}` | Versions, a diff between two, one version's changes |
-| `GET /search?q=[&system=&types=]` | By frequency (`857.9875`), call sign, identity (`BEE00.3A9`), talkgroup number in a system, or words (names, licensees); and `places` by name |
+| `GET /search?q=[&system=&types=]` | By frequency (`857.9875`), call sign, identity (`BEE00.3A9`), talkgroup number in a system, or words (names, licensees); and `places`: a name, "City, ST", "City, State" or a ZIP code, each with a point |
 | `GET /places`, `/places/{ST}`, `/places/{ST}/{county}`, `/places/{ST}/{county}/{place}` | By place: states with counts by type; a state's counties and regional systems; a county's systems and cities; a city's systems (Census GEOIDs) |
 | `GET /map/sites`, `GET /map/counties` | Every placed site with its transmitters; each county's count of systems |
 | `GET /map/callsigns` | The call signs shared systems have (the map leaves them off its licensed layer, which is the site's files: `/directory/geo/licensed/`) |

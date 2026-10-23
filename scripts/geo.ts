@@ -9,7 +9,8 @@
 //                          a little), for placing a site (src/places.ts)
 //   geo/counties.json      every county, simplified a lot, for the map's shading
 //   places.sql             the `places` table: every state, county and place, its
-//                          name and a point inside it (the drill-down's names)
+//                          name and a point inside it (the drill-down's names);
+//                          and `zips`: every ZIP code's point (the gazetteer's ZCTAs)
 //
 // scripts/maps.ts uploads them (R2, D1).
 
@@ -23,13 +24,15 @@ const WORK = join(ROOT, ".cache", "geo");
 const OUT = join(WORK, "out");
 const YEAR = 2024;
 const FILES = { county: `cb_${YEAR}_us_county_500k`, place: `cb_${YEAR}_us_place_500k`, county20m: `cb_${YEAR}_us_county_20m` };
+/** ZIP codes: the gazetteer's ZCTAs, each with a point inside it. */
+const ZCTA_URL = `https://www2.census.gov/geo/docs/maps-data/data/gazetteer/${YEAR}_Gazetteer/${YEAR}_Gaz_zcta_national.zip`;
 
 const mapshaper = (...args: string[]) => execFileSync(join(ROOT, "node_modules", ".bin", "mapshaper"), ["-quiet", ...args], { stdio: ["ignore", "inherit", "inherit"] });
 
-async function download(name: string): Promise<string> {
+async function download(name: string, from?: string): Promise<string> {
   const f = join(WORK, `${name}.zip`);
   if (existsSync(f)) return f;
-  const url = `https://www2.census.gov/geo/tiger/GENZ${YEAR}/shp/${name}.zip`;
+  const url = from ?? `https://www2.census.gov/geo/tiger/GENZ${YEAR}/shp/${name}.zip`;
   console.log(`downloading ${url}`);
   const r = await fetch(url);
   if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
@@ -54,6 +57,7 @@ mkdirSync(tmp);
 const county = await download(FILES.county);
 const place = await download(FILES.place);
 const county20m = await download(FILES.county20m);
+const zcta = await download(`zcta${YEAR}`, ZCTA_URL);
 
 // Each state's counties and places, a little simplified (a site near a line can
 // land either side of it: fine for listing it).
@@ -93,6 +97,14 @@ const sql = ["DELETE FROM places;"];
 for (let i = 0; i < rows.length; i += 400) {
   sql.push(`INSERT INTO places (geoid, kind, state, name, full_name, lat, lon) VALUES\n${rows.slice(i, i + 400).map((r) => `(${r.map(lit).join(", ")})`).join(",\n")};`);
 }
+// ZIP codes: GEOID, …, INTPTLAT, INTPTLONG (tab separated).
+const zips: unknown[][] = [];
+for (const line of execFileSync("unzip", ["-p", zcta], { encoding: "utf8", maxBuffer: 64 << 20 }).split("\n").slice(1)) {
+  const f = line.trim().split("\t");
+  if (/^\d{5}$/.test(f[0] ?? "") && f.length >= 7) zips.push([f[0], Number(f[5]), Number(f[6])]);
+}
+sql.push("DELETE FROM zips;");
+for (let i = 0; i < zips.length; i += 1000) sql.push(`INSERT INTO zips (zip, lat, lon) VALUES\n${zips.slice(i, i + 1000).map((r) => `(${r.map(lit).join(", ")})`).join(",\n")};`);
 writeFileSync(join(OUT, "places.sql"), sql.join("\n") + "\n");
 rmSync(tmp, { recursive: true, force: true });
-console.log(`${states.size} states, ${n} counties and places → ${OUT}`);
+console.log(`${states.size} states, ${n} counties and places, ${zips.length} ZIP codes → ${OUT}`);

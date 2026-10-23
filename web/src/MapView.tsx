@@ -12,6 +12,8 @@ import { useTheme } from "./theme.ts";
 export interface View {
   center: [number, number];
   zoom: number;
+  /** Instead: fit this box ([west, south, east, north]), clear of the panel on wide screens. */
+  fit?: [number, number, number, number];
 }
 
 export interface Layers {
@@ -69,11 +71,32 @@ function addLayers(map: MlMap, theme: "light" | "dark") {
       "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 3, 0.5, 8, 1.5],
     },
   });
+  // A selected system: all of its towers, ringed (the rest of the map dimmed: see select()).
+  map.addLayer({
+    id: "sites-selected", type: "circle", source: "sites", filter: ["==", ["get", "system"], ""],
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 5, 8, 7.5, 12, 9],
+      "circle-color": typeColor as never,
+      "circle-stroke-color": dark ? "#e8ebef" : "#16191d",
+      "circle-stroke-width": 2,
+    },
+  });
   map.addLayer({ id: "me-halo", type: "circle", source: "me", paint: { "circle-radius": 11, "circle-color": dark ? "#e8ebef" : "#16191d", "circle-opacity": 0.15 } });
   map.addLayer({ id: "me", type: "circle", source: "me", paint: { "circle-radius": 5, "circle-color": dark ? "#e8ebef" : "#16191d", "circle-stroke-color": dark ? "#15181c" : "#ffffff", "circle-stroke-width": 2 } });
 }
 
-export function MapView(props: { view: View; layers: Layers; onMove?: (v: View, bounds: [number, number, number, number]) => void; onPick?: (p: Picked) => void; className?: string; label: string }) {
+export function MapView(props: {
+  view: View;
+  layers: Layers;
+  onMove?: (v: View, bounds: [number, number, number, number]) => void;
+  onPick?: (p: Picked) => void;
+  /** A system whose towers are ringed, the others dimmed. */
+  selected?: string | null;
+  /** Offered at a click on nothing (and at a right click or long press): "Set my location here". */
+  pointAction?: { label: string; run: (at: [number, number]) => void };
+  className?: string;
+  label: string;
+}) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<MlMap | null>(null);
   const ready = useRef(false);
@@ -83,6 +106,7 @@ export function MapView(props: { view: View; layers: Layers; onMove?: (v: View, 
   layersRef.current = props.layers;
   const { effective } = useTheme();
   const [failed, setFailed] = useState<string | null>(null);
+  const popup = useRef<import("maplibre-gl").Popup | null>(null);
   const styleOf = useRef<((t: "light" | "dark") => import("maplibre-gl").StyleSpecification) | null>(null);
 
   // Put the data in (after each style load, too).
@@ -94,6 +118,11 @@ export function MapView(props: { view: View; layers: Layers; onMove?: (v: View, 
     (m.getSource("licensed") as GeoJSONSource | undefined)?.setData(l.licensed ?? empty());
     (m.getSource("reach") as GeoJSONSource | undefined)?.setData(l.reach ?? empty());
     (m.getSource("me") as GeoJSONSource | undefined)?.setData(l.me ? { type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [l.me[1], l.me[0]] } }] } : empty());
+    const sel = cb.current.selected ?? "";
+    if (m.getLayer("sites-selected")) {
+      m.setFilter("sites-selected", ["==", ["get", "system"], sel]);
+      m.setPaintProperty("sites", "circle-opacity", sel ? ["case", ["==", ["get", "system"], sel], 0.95, 0.22] : ["case", ["get", "stale"], 0.45, 0.95]);
+    }
     if (m.getSource("counties")) {
       m.removeFeatureState({ source: "counties" });
       for (const [geoid, n] of Object.entries(l.counties ?? {})) m.setFeatureState({ source: "counties", id: geoid }, { n });
@@ -112,7 +141,14 @@ export function MapView(props: { view: View; layers: Layers; onMove?: (v: View, 
       // @ts-expect-error: a stylesheet, which Vite bundles.
       await import("maplibre-gl/dist/maplibre-gl.css");
       if (gone || !el.current) return;
-      const m = new ml.Map({ container: el.current, style: basemapStyle(effective), center: [props.view.center[1], props.view.center[0]], zoom: props.view.zoom, attributionControl: { compact: true }, dragRotate: false, pitchWithRotate: false });
+      const f = props.view.fit;
+      const wide = el.current.clientWidth > 760;
+      const m = new ml.Map({
+        container: el.current, style: basemapStyle(effective), attributionControl: { compact: true }, dragRotate: false, pitchWithRotate: false,
+        ...(f
+          ? { bounds: [[f[0], f[1]], [f[2], f[3]]] as [[number, number], [number, number]], fitBoundsOptions: { padding: { top: 30, bottom: wide ? 30 : el.current.clientHeight * 0.45, left: wide ? 390 : 20, right: 30 } } }
+          : { center: [props.view.center[1], props.view.center[0]] as [number, number], zoom: props.view.zoom }),
+      });
       m.addControl(new ml.NavigationControl({ showCompass: false }), "top-right");
       m.touchZoomRotate.disableRotation();
       map.current = m;
@@ -139,7 +175,23 @@ export function MapView(props: { view: View; layers: Layers; onMove?: (v: View, 
         else if (f?.layer.id === "licensed") cb.current.onPick?.({ kind: "licensed", props: f.properties, lngLat: at });
         else if (f) cb.current.onPick?.({ kind: "county", props: f.properties, lngLat: at });
         else cb.current.onPick?.({ kind: "point", lngLat: at });
+        if (!f || f.layer.id === "counties-fill") offer(at);
       });
+      // A right click or a long press: the same offer, wherever it is.
+      m.on("contextmenu", (e: { lngLat: { lat: number; lng: number } }) => offer([e.lngLat.lat, e.lngLat.lng]));
+      const offer = (at: [number, number]) => {
+        const a = cb.current.pointAction;
+        if (!a) return;
+        popup.current?.remove();
+        const b = document.createElement("button");
+        b.className = "btn small";
+        b.textContent = a.label;
+        b.onclick = () => {
+          popup.current?.remove();
+          cb.current.pointAction?.run(at);
+        };
+        popup.current = new ml.Popup({ closeButton: false, offset: 6, className: "point-offer" }).setLngLat([at[1], at[0]]).setDOMContent(b).addTo(m);
+      };
       for (const id of ["sites", "licensed"]) {
         m.on("mouseenter", id, () => (m.getCanvas().style.cursor = "pointer"));
         m.on("mouseleave", id, () => (m.getCanvas().style.cursor = ""));
@@ -163,7 +215,7 @@ export function MapView(props: { view: View; layers: Layers; onMove?: (v: View, 
     map.current.setStyle(styleOf.current(effective));
   }, [effective]);
 
-  useEffect(sync, [props.layers]);
+  useEffect(sync, [props.layers, props.selected]);
 
   // A view asked for from outside (a place picked): flown to.
   const last = useRef(props.view);

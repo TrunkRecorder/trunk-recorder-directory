@@ -144,3 +144,9 @@ fieldset { border: 0; margin: 0; padding: 0; }
   .map-page { height: calc(100vh - 100px); }
   .map-panel { top: auto; bottom: 12px; max-height: 45%; }
 }
+
+.card.compact { padding: 8px 12px; }
+.place-list.one { grid-template-columns: 1fr; }
+.point-offer .maplibregl-popup-content { padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.12); }
+.point-offer .maplibregl-popup-tip { display: none; }
+.map-panel { width: min(360px, calc(100% - 24px)); }

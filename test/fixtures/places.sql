@@ -1390,3 +1390,9 @@ INSERT INTO places (geoid, kind, state, name, full_name, lat, lon) VALUES
 ('MD', 'state', 'MD', 'Maryland', 'Maryland', NULL, NULL),
 ('VA', 'state', 'VA', 'Virginia', 'Virginia', NULL, NULL),
 ('DC', 'state', 'DC', 'District of Columbia', 'District of Columbia', NULL, NULL);
+
+-- A few ZIP codes around Washington.
+INSERT INTO zips (zip, lat, lon) VALUES
+('20001', 38.910353, -77.017739),
+('20740', 39.002743, -76.930804),
+('22201', 38.886804, -77.094992);

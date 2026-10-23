@@ -120,3 +120,17 @@ test("where a system is: its transmitters and the places they're in; an unplaced
   assert.equal(u.transmitters.length, 0);
   assert.match(u.placements[0].note, /no license/);
 });
+
+test("place search: a name, \"City, ST\", \"City, State\", a ZIP code; each with a point to go to", async () => {
+  const { d } = await twoSystems();
+  const s = async (q: string) => (await d.get(`/search?q=${encodeURIComponent(q)}`)).json.places;
+  const dc = (await s("Washington, DC"))[0];
+  assert.equal(dc.geoid, "1150000");
+  assert.ok(dc.lat > 38.8 && dc.lon < -76.9);
+  assert.equal(dc.county, "11001", "a city with systems knows its county (for its browse link)");
+  assert.ok((await s("Arlington, va")).some((p: any) => p.geoid === "51013"));
+  assert.ok((await s("Arlington, Virginia")).some((p: any) => p.geoid === "5103000"));
+  assert.equal((await s("Arlington, MD")).length, 0, "not in Maryland");
+  assert.deepEqual((await s("20001")).map((p: any) => [p.kind, p.name, p.lat > 38.9]), [["zip", "ZIP 20001", true]]);
+  assert.equal((await s("99999")).length, 0);
+});
