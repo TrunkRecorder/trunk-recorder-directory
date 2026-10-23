@@ -60,3 +60,13 @@ export function TypeBadge(props: { type: string }) {
     </span>
   );
 }
+
+/** What a licensed (not shared) system likely is, by its licence's emissions: the scripts' licensedKind. */
+export type LicensedKind = "p25" | "dmr" | "nxdn" | "analog" | "";
+export const KIND_LABEL: Record<string, string> = { p25: "Likely P25", dmr: "Likely DMR", nxdn: "Likely NXDN", analog: "Analog FM", "": "Type unknown" };
+
+/** Whether the type filter shows a licensed system of this kind (analog under SmartNet or EDACS; unknown only with every type). As src/explore.ts licensedShown. */
+export function licensedShown(kind: LicensedKind, types: string[]): boolean {
+  if (kind === "analog") return types.includes("smartnet") || types.includes("edacs");
+  return kind ? types.includes(kind) : types.length === ALL_TYPES.length;
+}

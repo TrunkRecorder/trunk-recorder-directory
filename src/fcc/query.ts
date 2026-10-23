@@ -1,7 +1,7 @@
 // ArgusRF's FCC license lookup: which licensed transmitters are on a band near
 // a point, from its FCC ULS database (D1 `argus`, schema in schema.sql).
 //
-// COPIED from robotastic/argusrf at c07b841: shared/src/query.ts and the
+// COPIED from robotastic/argusrf at faeb0c8: shared/src/query.ts and the
 // functions of shared/src/geo.ts it uses, unchanged but for this header and
 // the one import made local. ArgusRF owns the data and its schema; this copy
 // is how the directory's Worker reads it. If ArgusRF changes either, copy them
@@ -75,6 +75,8 @@ export interface TransmitterRow {
   bandwidth_hz: number | null;
   bandwidth_source: string | null;
   emission_designator: string | null;
+  /** Every emission licensed on the frequency there, comma separated (null before the column existed). */
+  emissions: string | null;
   power_output_w: number | null;
   power_erp_w: number | null;
   lat: number;

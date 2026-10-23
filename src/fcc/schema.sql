@@ -1,5 +1,5 @@
 -- ArgusRF's FCC ULS database (the D1 database `argus`), as its ingest builds it:
--- copied from robotastic/argusrf ingest/src/db.ts (SCHEMA + INDEXES) at c07b841.
+-- copied from robotastic/argusrf ingest/src/db.ts (SCHEMA + INDEXES) at faeb0c8.
 -- The FCC lookup reads it; tests and local runs build a small one from this.
 -- If ArgusRF changes its schema, copy it again (test/fcc.test.ts checks the columns the lookup reads).
 
@@ -56,6 +56,11 @@ CREATE TABLE transmitter (
   bandwidth_hz        INTEGER,
   bandwidth_source    TEXT,                 -- 'emission' | 'upper_band' | 'service_default' | 'fallback'
   emission_designator TEXT,
+  -- Every emission the license gives this frequency here, comma separated
+  -- (emission_designator is the first): what it may carry. 8K10F1E P25,
+  -- 7K60FXE DMR, 4K00F1E NXDN, 11K2F3E analog FM, 20K0F1D a trunking control
+  -- channel's data...
+  emissions           TEXT,
 
   -- Power. ULS ships TPO and ERP in adjacent, easily-transposed columns; keep
   -- both rather than collapsing to one and losing which is which.
@@ -112,6 +117,11 @@ CREATE TABLE transmitter_inactive (
   bandwidth_hz        INTEGER,
   bandwidth_source    TEXT,                 -- 'emission' | 'upper_band' | 'service_default' | 'fallback'
   emission_designator TEXT,
+  -- Every emission the license gives this frequency here, comma separated
+  -- (emission_designator is the first): what it may carry. 8K10F1E P25,
+  -- 7K60FXE DMR, 4K00F1E NXDN, 11K2F3E analog FM, 20K0F1D a trunking control
+  -- channel's data...
+  emissions           TEXT,
 
   -- Power. ULS ships TPO and ERP in adjacent, easily-transposed columns; keep
   -- both rather than collapsing to one and losing which is which.

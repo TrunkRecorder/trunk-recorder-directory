@@ -203,6 +203,42 @@ export interface Licensed {
   lon: number;
   stationClass: string;
   frequencies: number;
+  /** What it likely is, by its licensed emissions (licensedKind). */
+  kind: LicensedKind;
+}
+
+/** What a licensed system likely is: its digital mode, or analog FM (SmartNet, EDACS, LTR: emissions can't tell), or unknown. */
+export type LicensedKind = "p25" | "dmr" | "nxdn" | "analog" | "";
+
+/** Emission designators by what carries them (the bandwidth, then the modulation and what's sent). */
+const KIND_OF: [Exclude<LicensedKind, "">, RegExp][] = [
+  ["p25", /^(8K10F1[EDW]|8K70D1[EDW]|9K80D7[EDW]|9K70D7W)$/], // C4FM, LSM/CQPSK simulcast, Phase 2 H-DQPSK
+  ["dmr", /^7K60FX[EDW]$/],
+  ["nxdn", /^(4K00F1[EDW]|4K00F7W|8K30F1[EDW]|8K30F7W)$/], // 6.25 kHz (dPMR shares it), 12.5 kHz
+  ["analog", /F3E$/], // FM voice
+];
+
+/**
+ * What a licensed system likely is, from its emissions (each frequency's
+ * licensed emissions, comma separated): the digital mode on the most of its
+ * frequencies; else analog FM; else unknown. A license often keeps analog
+ * beside digital, so digital wins.
+ */
+export function licensedKind(emissionsPerFrequency: (string | null)[]): LicensedKind {
+  const n: Record<string, number> = {};
+  for (const e of emissionsPerFrequency) {
+    const kinds = new Set<string>();
+    for (const code of (e ?? "").split(",")) for (const [k, re] of KIND_OF) if (re.test(code.trim().toUpperCase())) kinds.add(k);
+    for (const k of kinds) n[k] = (n[k] ?? 0) + 1;
+  }
+  const digital = (["p25", "dmr", "nxdn"] as const).filter((k) => n[k]).sort((a, b) => n[b] - n[a]);
+  return digital[0] ?? (n.analog ? "analog" : "");
+}
+
+/** Whether the type filter shows a licensed system of this kind (analog under SmartNet or EDACS; unknown only with every type). */
+export function licensedShown(kind: LicensedKind, types: string[]): boolean {
+  if (kind === "analog") return types.includes("smartnet") || types.includes("edacs");
+  return kind ? types.includes(kind) : types.length === TYPES.length;
 }
 
 /**
@@ -214,12 +250,16 @@ export interface Licensed {
  */
 export async function licensedSpots(fcc: Db): Promise<Licensed[]> {
   const rows = await fcc.all<Row>(
-    `SELECT t.call_sign, MAX(t.licensee_name) AS licensee, MAX(rs.description) AS service_desc, ROUND(t.lat, 4) AS lat, ROUND(t.lon, 4) AS lon, MAX(t.class_station_code) AS class, COUNT(*) AS n
+    `SELECT t.call_sign, MAX(t.licensee_name) AS licensee, MAX(rs.description) AS service_desc, ROUND(t.lat, 4) AS lat, ROUND(t.lon, 4) AS lon, MAX(t.class_station_code) AS class, COUNT(*) AS n,
+            GROUP_CONCAT(COALESCE(t.emissions, t.emission_designator, ''), ';') AS emissions
        FROM transmitter t LEFT JOIN radio_service rs ON rs.code = t.radio_service_code
       WHERE t.class_station_code LIKE 'FB%' AND (rs.description LIKE '%Trunked%' OR t.class_station_code LIKE 'FB8%')
       GROUP BY t.call_sign, ROUND(t.lat, 4), ROUND(t.lon, 4)`,
   );
-  return rows.map((r) => ({ callSign: r.call_sign as string, licensee: (r.licensee as string) ?? "", serviceDesc: (r.service_desc as string) ?? "", lat: r.lat as number, lon: r.lon as number, stationClass: (r.class as string) ?? "", frequencies: r.n as number }));
+  return rows.map((r) => ({
+    callSign: r.call_sign as string, licensee: (r.licensee as string) ?? "", serviceDesc: (r.service_desc as string) ?? "", lat: r.lat as number, lon: r.lon as number,
+    stationClass: (r.class as string) ?? "", frequencies: r.n as number, kind: licensedKind(String(r.emissions ?? "").split(";")),
+  }));
 }
 
 /** A licensed spot's file: its 1° cell ("38_-78": the floor of its latitude and longitude). */

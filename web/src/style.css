@@ -150,3 +150,12 @@ fieldset { border: 0; margin: 0; padding: 0; }
 .point-offer .maplibregl-popup-content { padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.12); }
 .point-offer .maplibregl-popup-tip { display: none; }
 .map-panel { width: min(360px, calc(100% - 24px)); }
+
+/* A licensed (not shared) system's likely type: subtle, its colour as an outline. */
+.kind-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; }
+.kind-badge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--muted); }
+.kind-badge[data-kind="p25"]::before { border-color: #2f7ff5; }
+.kind-badge[data-kind="dmr"]::before { border-color: #1f9e74; }
+.kind-badge[data-kind="nxdn"]::before { border-color: #8e5bd6; }
+.card.licensed { border-style: dashed; cursor: pointer; }
+.card.licensed .card-title { color: var(--ink); font-weight: 500; }

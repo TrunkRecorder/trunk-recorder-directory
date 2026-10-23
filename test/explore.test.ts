@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { latLngToCell } from "h3-js";
-import { licensedCell, licensedSpots, parseTypes } from "../src/explore.ts";
+import { licensedCell, licensedKind, licensedShown, licensedSpots, parseTypes } from "../src/explore.ts";
 import { fccSqlite } from "../src/sqlite.ts";
 import { directory, obs, p25Site, recorder } from "./helpers.ts";
 
@@ -133,4 +133,26 @@ test("place search: a name, \"City, ST\", \"City, State\", a ZIP code; each with
   assert.equal((await s("Arlington, MD")).length, 0, "not in Maryland");
   assert.deepEqual((await s("20001")).map((p: any) => [p.kind, p.name, p.lat > 38.9]), [["zip", "ZIP 20001", true]]);
   assert.equal((await s("99999")).length, 0);
+});
+
+test("what a licensed system likely is, by its emissions: digital wins over analog kept beside it", () => {
+  assert.equal(licensedKind(["8K10F1E,8K10F1D", "8K10F1D"]), "p25");
+  assert.equal(licensedKind(["8K70D1W"]), "p25", "simulcast LSM");
+  assert.equal(licensedKind(["9K80D7W"]), "p25", "Phase 2");
+  assert.equal(licensedKind(["11K0F3E,7K60FXE", "11K2F3E"]), "dmr", "DMR with analog FM still licensed");
+  assert.equal(licensedKind(["4K00F1E"]), "nxdn");
+  assert.equal(licensedKind(["20K0F2D", "20K0F3E"]), "analog", "SmartNet-style: a data control channel and FM voice");
+  assert.equal(licensedKind(["7K60FXE", "8K10F1E", "8K10F1E"]), "p25", "the mode on the most frequencies");
+  assert.equal(licensedKind([null, ""]), "");
+  // The type filter: analog under SmartNet or EDACS; unknown only when showing every type.
+  assert.ok(licensedShown("p25", ["p25"]) && !licensedShown("dmr", ["p25"]));
+  assert.ok(licensedShown("analog", ["smartnet"]) && licensedShown("analog", ["edacs"]) && !licensedShown("analog", ["p25", "dmr"]));
+  assert.ok(licensedShown("", ["p25", "smartnet", "dmr", "nxdn", "edacs"]) && !licensedShown("", ["p25"]));
+});
+
+test("the licensed layer's spots know their kind: DC Fire and EMS's are P25, WMATA's analog", async () => {
+  const all = await licensedSpots(fccSqlite());
+  const kinds = (c: string) => [...new Set(all.filter((x) => x.callSign === c).map((x) => x.kind))];
+  assert.deepEqual(kinds("WPXT459"), ["p25"]);
+  assert.deepEqual(kinds("WPVX365"), ["analog"]);
 });

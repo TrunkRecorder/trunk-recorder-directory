@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { FeatureCollection, Point } from "geojson";
 import { ago, get, nameOf, titleCase, TYPE, type MapSite, type NearSystem } from "./api.ts";
 import { TYPE_COLOR } from "./colors.ts";
-import { ALL_TYPES, TypeBadge, TypeFilter, typesOf, typesParam, typesValue, withQuery } from "./filters.tsx";
+import { ALL_TYPES, KIND_LABEL, licensedShown, TypeBadge, TypeFilter, typesOf, typesParam, typesValue, withQuery, type LicensedKind } from "./filters.tsx";
 import { MapView, sitePoints, type Picked, type View } from "./MapView.tsx";
 import { best, coverage, distanceKm, level, LEVELS } from "./reception.ts";
 import { go, Link } from "./router.tsx";
@@ -26,7 +26,7 @@ const LICENSED_ZOOM = 8;
 
 interface PlaceHit { geoid: string; kind: string; state: string; name: string; lat: number | null; lon: number | null }
 interface StateRow { state: string; name: string; systems: number; byType: Record<string, number> }
-interface Licensed { callSign: string; licensee: string; serviceDesc: string; lat: number; lon: number; stationClass: string; frequencies: number }
+interface Licensed { callSign: string; licensee: string; serviceDesc: string; lat: number; lon: number; stationClass: string; frequencies: number; kind: LicensedKind }
 
 /** "38.9072, -77.0369" (as a map copies it): a point, or null. */
 export const latLon = (s: string | null): [number, number] | null => {
@@ -134,8 +134,8 @@ export function ExplorePage(props: { query: URLSearchParams }) {
           let p = cellCache.current.get(c);
           if (!p) {
             p = fetch(`/directory/geo/licensed/${c}.json`)
-              .then((r) => r.json() as Promise<{ spots: [string, string, string, number, number, string, number][] }>)
-              .then((j) => j.spots.map(([callSign, licensee, serviceDesc, lat, lon, stationClass, frequencies]) => ({ callSign, licensee, serviceDesc, lat, lon, stationClass, frequencies })));
+              .then((r) => r.json() as Promise<{ spots: [string, string, string, number, number, string, number, LicensedKind?][] }>)
+              .then((j) => j.spots.map(([callSign, licensee, serviceDesc, lat, lon, stationClass, frequencies, kind]) => ({ callSign, licensee, serviceDesc, lat, lon, stationClass, frequencies, kind: kind ?? "" })));
             cellCache.current.set(c, p);
           }
           return p;
@@ -148,12 +148,26 @@ export function ExplorePage(props: { query: URLSearchParams }) {
     };
   }, [showLicensed, bounds, zoom]);
 
+  // Licensed systems the type filter shows, and those in view by licence (each once, with its towers).
+  const shownLicensed = useMemo(() => licensed.filter((l) => licensedShown(l.kind, types)), [licensed, types.join(",")]);
+  const licensedInView = useMemo(() => {
+    const by = new Map<string, { callSign: string; licensee: string; kind: LicensedKind; serviceDesc: string; towers: number }>();
+    for (const l of shownLicensed) {
+      const v = by.get(l.callSign) ?? { callSign: l.callSign, licensee: l.licensee, kind: l.kind, serviceDesc: l.serviceDesc, towers: 0 };
+      v.towers++;
+      by.set(l.callSign, v);
+    }
+    return [...by.values()].sort((a, b) => b.towers - a.towers || a.licensee.localeCompare(b.licensee));
+  }, [shownLicensed]);
+  const [license, setLicense] = useState<string | null>(null);
+  const [hoverLicense, setHoverLicense] = useState<string | null>(null);
+
   const focus = selected ?? hover ?? (me && reception ? nearRows[0]?.id : null) ?? null;
   const layers = useMemo(() => {
-    const lic: FeatureCollection<Point> = { type: "FeatureCollection", features: licensed.map((l) => ({ type: "Feature", properties: { ...l }, geometry: { type: "Point", coordinates: [l.lon, l.lat] } })) };
+    const lic: FeatureCollection<Point> = { type: "FeatureCollection", features: shownLicensed.map((l) => ({ type: "Feature", properties: { ...l }, geometry: { type: "Point", coordinates: [l.lon, l.lat] } })) };
     const sel = me && reception ? nearRows.find((r) => r.id === focus) : null;
     return { counties, sites: sitePoints(sites ?? []), licensed: lic, me, reach: sel ? coverage(sel.transmitters) : undefined };
-  }, [sites, counties, licensed, me?.[0], me?.[1], reception, focus, nearRows]);
+  }, [sites, counties, shownLicensed, me?.[0], me?.[1], reception, focus, nearRows]);
 
   const onMove = (v: View, b: [number, number, number, number]) => {
     setBounds(b);
@@ -164,9 +178,11 @@ export function ExplorePage(props: { query: URLSearchParams }) {
   const onPick = (p: Picked) => {
     if (p.kind === "site") {
       setPicked(null);
+      setLicense(null);
       set({ sel: String(p.props.system) });
     } else {
       set({ sel: null });
+      setLicense(p.kind === "licensed" ? String(p.props.callSign) : null);
       setPicked(p.kind === "point" ? null : p);
     }
   };
@@ -183,6 +199,7 @@ export function ExplorePage(props: { query: URLSearchParams }) {
         view={view}
         layers={layers}
         selected={focus}
+        selectedLicense={license ?? hoverLicense}
         onMove={onMove}
         onPick={onPick}
         pointAction={{ label: "Set my location here", run: (p) => setMe(p) }}
@@ -218,8 +235,14 @@ export function ExplorePage(props: { query: URLSearchParams }) {
         {picked?.kind === "licensed" && (
           <div className="card">
             <div className="card-title">{titleCase(String(picked.props.licensee)) || String(picked.props.callSign)}</div>
+            <div className="row small">
+              <span className="kind-badge" data-kind={String(picked.props.kind)}>
+                {KIND_LABEL[String(picked.props.kind)]}
+              </span>
+              <span className="muted">by its licence</span>
+            </div>
             <div className="muted small">
-              {String(picked.props.callSign)} · {String(picked.props.serviceDesc)} · {String(picked.props.frequencies)} frequencies here
+              {String(picked.props.callSign)} · {String(picked.props.serviceDesc)} · {licensed.filter((l) => l.callSign === picked.props.callSign).length} towers, ringed on the map
             </div>
             <p className="small">Licensed, but no one has shared it yet. Recording it with Trunk Recorder Pro? Turn on Share in its Setup.</p>
           </div>
@@ -324,6 +347,39 @@ export function ExplorePage(props: { query: URLSearchParams }) {
           </section>
         )}
 
+        {showLicensed && zoom >= LICENSED_ZOOM && (
+          <section className="stack">
+            <div className="row">
+              <h2>Licensed, not shared yet</h2>
+              <span className="spacer" />
+              <span className="muted small">{licensedInView.length}</span>
+            </div>
+            {!licensedInView.length && <p className="muted small">None of these types licensed here.</p>}
+            <ul className="cards">
+              {licensedInView.slice(0, 30).map((l) => (
+                <li
+                  key={l.callSign}
+                  className={`card compact licensed${license === l.callSign ? " focus" : ""}`}
+                  onMouseEnter={() => setHoverLicense(l.callSign)}
+                  onMouseLeave={() => setHoverLicense(null)}
+                  onClick={() => setLicense(license === l.callSign ? null : l.callSign)}
+                >
+                  <div className="row">
+                    <span className="card-title">{titleCase(l.licensee) || l.callSign}</span>
+                    <span className="kind-badge" data-kind={l.kind}>
+                      {KIND_LABEL[l.kind]}
+                    </span>
+                  </div>
+                  <div className="muted small">
+                    {l.callSign} · {l.towers} tower{l.towers === 1 ? "" : "s"} in view
+                  </div>
+                </li>
+              ))}
+            </ul>
+            {licensedInView.length > 30 && <p className="muted small">and {licensedInView.length - 30} more: zoom in.</p>}
+          </section>
+        )}
+
         <div className="legend small muted">
           {ALL_TYPES.filter((t) => types.includes(t)).map((t) => (
             <span key={t}>
@@ -331,7 +387,16 @@ export function ExplorePage(props: { query: URLSearchParams }) {
               {TYPE[t]}
             </span>
           ))}
-          <span>Each dot is a tower: a system can have many. Click one to ring them all.</span>
+          <span>
+            <span className="dot" style={{ background: "var(--muted)" }} aria-hidden="true" />
+            Shared: a tower of a system Trunk Recorder Pro users share. A system can have many: click one to ring them all.
+          </span>
+          {showLicensed && (
+            <span>
+              <span className="ring" aria-hidden="true" />
+              Licensed, not shared: a ring in the colour of what its licence says it likely is (grey: analog or unknown).
+            </span>
+          )}
         </div>
       </aside>
     </div>

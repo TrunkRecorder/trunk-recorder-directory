@@ -57,9 +57,23 @@ function addLayers(map: MlMap, theme: "light" | "dark") {
   map.addLayer({ id: "counties-line", type: "line", source: "counties", minzoom: 5, paint: { "line-color": dark ? "#3a414b" : "#c9ccd2", "line-width": 0.5, "line-opacity": ["interpolate", ["linear"], ["zoom"], 5, 0, 7, 0.8] } });
   // Where a system would be heard: squares by level, merged into one footprint (no outlines).
   map.addLayer({ id: "reach-fill", type: "fill", source: "reach", paint: { "fill-color": ["match", ["get", "level"], "Strong", "#1f9e74", "Good", "#5fbf6a", "Fair", "#e0b31e", "#d2457a"], "fill-opacity": dark ? 0.28 : 0.22, "fill-antialias": false } });
+  // Licensed, not shared: hollow rings, in the colour of what their licence says they likely are (grey: analog
+  // or unknown), smaller and fainter than shared systems' filled dots.
+  const kindColor = ["match", ["get", "kind"], "p25", TYPE_COLOR.p25, "dmr", TYPE_COLOR.dmr, "nxdn", TYPE_COLOR.nxdn, dark ? "#8b939e" : "#7d838c"];
   map.addLayer({
     id: "licensed", type: "circle", source: "licensed", minzoom: 8,
-    paint: { "circle-radius": 4, "circle-color": "transparent", "circle-stroke-color": dark ? "#8b939e" : "#7d838c", "circle-stroke-width": 1.2, "circle-stroke-opacity": 0.8 },
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 3.5, 12, 5],
+      "circle-color": kindColor as never,
+      "circle-opacity": 0.1,
+      "circle-stroke-color": kindColor as never,
+      "circle-stroke-width": 1.4,
+      "circle-stroke-opacity": 0.75,
+    },
+  });
+  map.addLayer({
+    id: "licensed-selected", type: "circle", source: "licensed", minzoom: 8, filter: ["==", ["get", "callSign"], ""],
+    paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 6, 12, 8], "circle-color": "transparent", "circle-stroke-color": kindColor as never, "circle-stroke-width": 2.5 },
   });
   map.addLayer({
     id: "sites", type: "circle", source: "sites",
@@ -92,6 +106,8 @@ export function MapView(props: {
   onPick?: (p: Picked) => void;
   /** A system whose towers are ringed, the others dimmed. */
   selected?: string | null;
+  /** A licensed (not shared) call sign whose towers are ringed. */
+  selectedLicense?: string | null;
   /** Offered at a click on nothing (and at a right click or long press): "Set my location here". */
   pointAction?: { label: string; run: (at: [number, number]) => void };
   className?: string;
@@ -119,6 +135,7 @@ export function MapView(props: {
     (m.getSource("reach") as GeoJSONSource | undefined)?.setData(l.reach ?? empty());
     (m.getSource("me") as GeoJSONSource | undefined)?.setData(l.me ? { type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [l.me[1], l.me[0]] } }] } : empty());
     const sel = cb.current.selected ?? "";
+    if (m.getLayer("licensed-selected")) m.setFilter("licensed-selected", ["==", ["get", "callSign"], cb.current.selectedLicense ?? ""]);
     if (m.getLayer("sites-selected")) {
       m.setFilter("sites-selected", ["==", ["get", "system"], sel]);
       m.setPaintProperty("sites", "circle-opacity", sel ? ["case", ["==", ["get", "system"], sel], 0.95, 0.22] : ["case", ["get", "stale"], 0.45, 0.95]);
@@ -215,7 +232,7 @@ export function MapView(props: {
     map.current.setStyle(styleOf.current(effective));
   }, [effective]);
 
-  useEffect(sync, [props.layers, props.selected]);
+  useEffect(sync, [props.layers, props.selected, props.selectedLicense]);
 
   // A view asked for from outside (a place picked): flown to.
   const last = useRef(props.view);
