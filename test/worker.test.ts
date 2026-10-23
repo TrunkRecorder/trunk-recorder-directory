@@ -26,7 +26,7 @@ function fakeD1(db: Db = sqlite()) {
 function env(over: Partial<Env> = {}) {
   const put: string[] = [];
   // (As Cloudflare's assets do: index.html is served at its folder, and redirects there.)
-  const files: Record<string, string> = { "/directory/": "<html>app</html>", "/directory/assets/app.js": "js" };
+  const files: Record<string, string> = { "/directory/": "<html>app</html>", "/directory/assets/app.js": "js", "/directory/fonts/Noto%20Sans%20Regular/0-255.pbf": "glyphs" };
   let allowed = true;
   const e: Env = {
     DB: fakeD1().d1,
@@ -151,4 +151,19 @@ test("API reads are kept at the edge until the data changes: a share answers ane
   } finally {
     delete g.caches;
   }
+});
+
+test("the basemap's style and fonts, for other apps' maps: at this origin, any origin may load them", async () => {
+  const { e } = env();
+  const r = await get(e, "/directory/map/style-dark.json");
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get("access-control-allow-origin"), "*");
+  const style = (await r.json()) as any;
+  assert.equal(style.sources.protomaps.tiles[0], "https://trunkrecorder.pro/directory/tiles/{z}/{x}/{y}.mvt");
+  assert.equal(style.glyphs, "https://trunkrecorder.pro/directory/fonts/{fontstack}/{range}.pbf");
+  assert.ok(style.layers.some((l: any) => l.id === "water") && !style.layers.some((l: any) => l.id === "pois"));
+  assert.notEqual(JSON.stringify(style), JSON.stringify(await (await get(e, "/directory/map/style-light.json")).json()), "two palettes");
+  const f = await get(e, "/directory/fonts/Noto%20Sans%20Regular/0-255.pbf");
+  assert.equal(await f.text(), "glyphs");
+  assert.equal(f.headers.get("access-control-allow-origin"), "*");
 });

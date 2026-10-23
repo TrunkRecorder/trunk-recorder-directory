@@ -8,6 +8,7 @@ import { BASE, handle, isAdmin, json } from "./api.ts";
 import { d1 } from "./db.ts";
 import { FCC_BASE, handleFcc } from "./fcc/api.ts";
 import { Places } from "./places.ts";
+import { basemapStyle } from "./mapstyle.ts";
 import { tile, upload } from "./tiles.ts";
 
 export interface Env {
@@ -123,7 +124,16 @@ export default {
       }
     }
     if (!url.pathname.startsWith("/directory/")) return new Response("Not found", { status: 404 });
+    // The basemap's style, for other apps' maps (Trunk Recorder Pro's location picker): its tiles and fonts here.
+    const st = /^\/directory\/map\/style-(light|dark)\.json$/.exec(url.pathname);
+    if (st) return Response.json(basemapStyle(st[1] as "light" | "dark", url.origin), { headers: { "access-control-allow-origin": "*", "cache-control": "public, max-age=86400" } });
     const res = await env.ASSETS.fetch(req);
+    // The map's fonts, for other apps' maps too.
+    if (url.pathname.startsWith("/directory/fonts/") && res.ok) {
+      const r = new Response(res.body, res);
+      r.headers.set("access-control-allow-origin", "*");
+      return r;
+    }
     // A route of the app, not a file: the app. (As /directory/: assets redirect index.html to it.)
     if (res.status === 404 && !/\.[a-z0-9]+$/i.test(url.pathname)) return env.ASSETS.fetch(new Request(`${url.origin}/directory/`, req));
     return res;
