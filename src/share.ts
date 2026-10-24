@@ -12,6 +12,7 @@ import { type ClaimKeys, callSignClaim, neighbourClaim, siteClaims, systemClaim 
 import { type Db, type Row, insertRows, marks } from "./db.ts";
 import { NameIndex } from "./names.ts";
 import type { Observation, ObservedSite, SiteIdentity } from "./observation.ts";
+import { sameSite } from "./sites.ts";
 import { ChangeSet } from "./store.ts";
 
 const raster = (hz: number) => Math.round(hz / 6250) * 6250;
@@ -147,6 +148,24 @@ async function findSystem(cs: ChangeSet, obs: Observation, region: string | null
   if (!systemId && idClaims.length) systemId = (await lookupClaims(cs, idClaims, "system"))[0]?.id ?? null;
   const licensed = await byCallSign(cs, type, callSigns, ids);
   if (!systemId) systemId = licensed[0] ?? null;
+  // Within the system it is, a site nothing named yet is one of its own that is the same site (sites.ts):
+  // a share without site IDs (a first share after an import) or claims (a weak identity without a region).
+  if (systemId) {
+    const own = (await cs.query("site", "system_id = ?", [systemId], (r) => r.system_id === systemId)).filter((x) => x.status === "heard" || x.status === "announced");
+    for (const [i, s] of obs.system.sites.entries()) {
+      if (siteMatch[i]) continue;
+      const me = { rfss: ids[i].rfss ?? null, site: ids[i].site ?? null, controlHz: s.controlChannelsHz };
+      for (const x of own) {
+        const xid = x.id as string;
+        if (siteMatch.includes(xid)) continue;
+        const cc = await cs.query("freq", "site_id = ? AND use = 'control'", [xid], (r) => r.site_id === xid && r.use === "control");
+        if (sameSite(me, { rfss: x.rfss as number | null, site: x.site as number | null, controlHz: cc.map((f) => f.freq_hz as number) }) && (await weakMatchHolds(cs, xid, ids[i]))) {
+          siteMatch[i] = xid;
+          break;
+        }
+      }
+    }
+  }
   const sysClaims = [...idClaims, ...callSigns.map((c) => callSignClaim(type, c)).filter((c): c is ClaimKeys => !!c)];
   // Another system its sites (or identity, strongly) say it is: the same system, found twice.
   for (const s of sitesSystems) {

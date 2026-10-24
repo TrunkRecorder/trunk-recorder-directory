@@ -18,7 +18,7 @@
 import { type ClaimKeys, systemClaim } from "./claims.ts";
 import { type Db, type Row, marks } from "./db.ts";
 import { cellOf, distanceKm, regionOf } from "./geo.ts";
-import { keeper, mergeSystems } from "./merge.ts";
+import { keeper, mergeSiteTwins, mergeSystems } from "./merge.ts";
 import { placeSystem } from "./place.ts";
 import type { Places } from "./places.ts";
 import { claim, lookupClaims, resolve } from "./share.ts";
@@ -118,7 +118,7 @@ export async function twinsOf(db: Db, systemId: string, now: number): Promise<{ 
   return [...out].map(([id, why]) => ({ id, why }));
 }
 
-/** Place a system's sites, then merge the records that are it into one. */
+/** Place a system's sites, then merge the records that are it into one, and its sites recorded twice. */
 export async function placeJoining(db: Db, fcc: Db, places: Places, systemId: string, opts: { now: number; force?: boolean }) {
   const placed = await placeSystem(db, fcc, places, systemId, opts);
   const merged: string[] = [];
@@ -129,5 +129,7 @@ export async function placeJoining(db: Db, fcc: Db, places: Places, systemId: st
     systemId = (await mergeSystems(db, keep, gone, { actorKind: "system", actorId: "matcher", note: t.why }, t.why)).kept;
     merged.push(gone);
   }
-  return { ...placed, systemId, merged };
+  // And its own sites, recorded twice.
+  const mergedSites = await mergeSiteTwins(db, systemId, { actorKind: "system", actorId: "matcher" });
+  return { ...placed, systemId, merged, mergedSites };
 }

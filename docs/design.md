@@ -152,6 +152,16 @@ site claim, which is under the system's: `p25:BEE00.3A9/1.5`. A site moving to
 another system is a re-parent, done as a revision, and keeps its ID. That matches what
 happens on the air: a site re-homed to a new core, or two records found to be one system.
 
+**When two site records are one site** (`src/sites.ts`, the one rule for all three cases below): site numbers
+decide when both sites have them (P25 RFSS and site; SmartNet, DMR and NXDN site), so 1-3 and 1-4 stay two
+sites even with a control channel in common. When either has no number, a control channel in common makes
+them one. The rule is used in three places:
+- A share matched to a system looks for any site it didn't name among that system's own sites. A recorder's
+  first share after an import names no site IDs, and a weak identity with no region has no claims to match on.
+- A system merge joins the sites that are one site.
+- After placing, a system's own sites recorded twice are merged. The one first heard is kept, and the other's
+  ID redirects to it.
+
 What a site holds:
 - its control channels, primary and alternates, each with first and last heard;
 - the voice channels granted from it, with how often;
