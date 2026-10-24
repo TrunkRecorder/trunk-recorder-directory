@@ -128,6 +128,23 @@ Matching scores the claims and decides:
 - **Conflict** (the same claim near two different records): it goes to a person.
 - **No match:** a new record, provisional until a second recorder (or the FCC) confirms it.
 
+**A system found twice** (`src/twins.ts`). Recorders at two ends of a statewide system share it
+before either names the other. So after a system's sites are placed at their licensed towers,
+the records that are it are merged into one. Each of these counts only when nothing on the air
+disagrees, because a WACN or a SysID that differs is another system, even under one license:
+- the same licensed tower, under the same call sign;
+- its weak identity, claimed in the regions its towers are in, and held by another record
+  there or in a neighbouring region;
+- the same FCC licensee, compared by name however it's written ("MADISON, COUNTY OF" is
+  "Madison County"):
+  - with the same identity, at any distance (State of Indiana - IPSC's two ends are regions
+    apart, under different call signs);
+  - with no identity on one of them (DMR, or a site not decoded yet), only when their towers
+    are within 50 km.
+
+This runs after every share and on an admin re-place (`POST /place`), which mends records made
+before a rule existed.
+
 ### Systems and sites
 
 A site belongs to exactly one system (`site.system_id`). Its own identity is its
