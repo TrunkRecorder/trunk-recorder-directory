@@ -160,3 +160,19 @@ fieldset { border: 0; margin: 0; padding: 0; }
 .card.licensed { border-style: dashed; cursor: pointer; }
 .card.licensed .card-title { color: var(--ink); font-weight: 500; }
 .btn.disabled { opacity: 0.5; pointer-events: none; }
+
+/* The SDRs a system takes (Sdrs.tsx). */
+.sdr-plan .sdr-sites { border: 0; padding: 0; margin: 0; }
+.sdr-plan .chip input { margin: 0; }
+.sdr-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.sdr-count { font-size: 22px; }
+.band-plan { margin: 0; padding: 12px 14px 8px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+.band-plan svg { display: block; width: 100%; height: auto; }
+.band-plan .grid { stroke: var(--line); stroke-width: 1; }
+.band-plan .axis-line { stroke: var(--muted); stroke-width: 1; }
+.band-plan .axis { fill: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.band-plan .lane-label { fill: var(--ink); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.band-plan figcaption { margin-top: 6px; }
+.legend-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); vertical-align: middle; }
+.legend-tick { display: inline-block; width: 2px; height: 10px; background: var(--muted); vertical-align: middle; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: middle; }

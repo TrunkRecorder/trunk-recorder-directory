@@ -1,13 +1,14 @@
 // A system: its sites (heard, and announced by neighbours), talkgroups (with
 // the other names people gave), licenses, and history; any version of it; and
-// adding it to Trunk Recorder Pro.
+// adding it to Trunk Recorder Pro; and the SDRs it takes (Sdrs.tsx).
 
 import { useEffect, useMemo, useState } from "react";
 import { ago, get, hex, mhz, NotFound, titleCase, TYPE, API, type HistoryEntry, type SystemView, type TalkgroupView } from "./api.ts";
 import { go, Link } from "./router.tsx";
 import { MapView } from "./MapView.tsx";
+import { SdrPlanner } from "./Sdrs.tsx";
 
-type Tab = "sites" | "talkgroups" | "licenses" | "history";
+type Tab = "sites" | "talkgroups" | "licenses" | "sdrs" | "history";
 
 export function SystemPage(props: { id: string; tab: Tab; query: URLSearchParams }) {
   const rev = props.query.get("rev");
@@ -78,12 +79,14 @@ export function SystemPage(props: { id: string; tab: Tab; query: URLSearchParams
         {tab("sites", `Sites (${sys.sites.length})`)}
         {tab("talkgroups", `Talkgroups (${sys.talkgroupCount})`)}
         {tab("licenses", `Licenses (${Object.keys(sys.licenses).length})`)}
+        {tab("sdrs", "SDRs needed")}
         {tab("history", "History")}
       </nav>
       {props.tab === "sites" && where && <Where sys={sys} w={where} />}
       {props.tab === "sites" && <Sites sys={sys} />}
       {props.tab === "talkgroups" && <Talkgroups sys={sys} tgs={tgs} initial={props.query.get("q") ?? ""} />}
       {props.tab === "licenses" && <Licenses sys={sys} />}
+      {props.tab === "sdrs" && <SdrPlanner sys={sys} />}
       {props.tab === "history" && <History sys={sys} />}
       {adding && <AddDialog sys={sys} onClose={() => setAdding(false)} />}
     </div>
