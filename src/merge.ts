@@ -7,6 +7,7 @@
 import type { Db, Row } from "./db.ts";
 import { NameIndex } from "./names.ts";
 import { reindex, resolve } from "./share.ts";
+import { sameSite } from "./sites.ts";
 import { ChangeSet, type ChangeSetInfo } from "./store.ts";
 
 const TG_FIELDS = ["alpha", "description", "mode", "tag", "category", "priority"];
@@ -37,28 +38,13 @@ export async function mergeSystems(db: Db, keepId: string, goneId: string, info:
 
   for (const f of ["wacn", "sys_id", "lat", "lon"] as const) if (keep[f] == null && gone[f] != null) await cs.set("system", keepId, f, gone[f]);
 
-  // Sites: one with the same identity is the same site.
-  const keepSites = await cs.query("site", "system_id = ?", [keepId], (r) => r.system_id === keepId);
-  const goneSites = await cs.query("site", "system_id = ?", [goneId], (r) => r.system_id === goneId);
-  const sameSite = (a: Row, b: Row) => a.rfss != null && a.rfss === b.rfss && a.site === b.site;
+  // Sites: one that is the same site (sites.ts) is one.
+  const keepSites = await withControl(cs, await cs.query("site", "system_id = ?", [keepId], (r) => r.system_id === keepId));
+  const goneSites = await withControl(cs, await cs.query("site", "system_id = ?", [goneId], (r) => r.system_id === goneId));
   for (const s of goneSites) {
-    const id = s.id as string;
-    const twin = keepSites.find((k) => sameSite(k, s));
-    if (!twin) {
-      await cs.set("site", id, "system_id", keepId);
-      continue;
-    }
-    const twinId = twin.id as string;
-    for (const f of await cs.query("freq", "site_id = ?", [id], (r) => r.site_id === id)) await cs.set("freq", f.id as string, "site_id", twinId);
-    for (const n of await cs.query("neighbour", "site_id = ? OR neighbour_id = ?", [id, id], (r) => r.site_id === id || r.neighbour_id === id)) {
-      if (n.site_id === id) await cs.set("neighbour", n.id as string, "site_id", twinId);
-      if (n.neighbour_id === id) await cs.set("neighbour", n.id as string, "neighbour_id", twinId);
-    }
-    for (const c of await cs.query("claim", "record_id = ?", [id], (r) => r.record_id === id)) await cs.set("claim", c.id as string, "record_id", twinId);
-    if (twin.status === "announced" && s.status === "heard") await cs.set("site", twinId, "status", "heard");
-    await cs.set("site", id, "status", "merged");
-    await cs.set("site", id, "merged_into", twinId);
-    await cs.create("redirect", { id, new_id: twinId });
+    const twin = s.status === "merged" ? undefined : keepSites.find((k) => k.status !== "merged" && sameSite(k, s));
+    if (!twin) await cs.set("site", s.id as string, "system_id", keepId);
+    else await absorbSite(cs, s, twin);
   }
 
   // Talkgroups: one number, one talkgroup; its candidates pooled.
@@ -101,4 +87,67 @@ export async function mergeSystems(db: Db, keepId: string, goneId: string, info:
   await reindex(db, keepId);
   await reindex(db, goneId);
   return { kept: keepId, gone: goneId, changesetId: cs.id, rev: revs.get(keepId) ?? 0 };
+}
+
+type SiteRow = Row & { rfss: number | null; site: number | null; controlHz: number[] };
+
+/** Sites with their control channels, as sites.ts compares them. */
+async function withControl(cs: ChangeSet, sites: Row[]): Promise<SiteRow[]> {
+  const out: SiteRow[] = [];
+  for (const s of sites) {
+    const id = s.id as string;
+    const cc = await cs.query("freq", "site_id = ? AND use = 'control'", [id], (r) => r.site_id === id && r.use === "control");
+    out.push({ ...s, rfss: s.rfss as number | null, site: s.site as number | null, controlHz: cc.map((f) => f.freq_hz as number) });
+  }
+  return out;
+}
+
+/** Site `gone` is site `twin`: its channels, neighbour links and claims move there, and its ID redirects. */
+async function absorbSite(cs: ChangeSet, gone: Row, twin: Row): Promise<void> {
+  const id = gone.id as string;
+  const twinId = twin.id as string;
+  const have = new Set((await cs.query("freq", "site_id = ?", [twinId], (r) => r.site_id === twinId)).map((f) => `${f.use}:${f.freq_hz}`));
+  for (const f of await cs.query("freq", "site_id = ?", [id], (r) => r.site_id === id)) {
+    // A channel both had is the twin's already.
+    if (!have.has(`${f.use}:${f.freq_hz}`)) await cs.set("freq", f.id as string, "site_id", twinId);
+  }
+  for (const n of await cs.query("neighbour", "site_id = ? OR neighbour_id = ?", [id, id], (r) => r.site_id === id || r.neighbour_id === id)) {
+    if (n.site_id === id) await cs.set("neighbour", n.id as string, "site_id", twinId);
+    if (n.neighbour_id === id) await cs.set("neighbour", n.id as string, "neighbour_id", twinId);
+  }
+  for (const c of await cs.query("claim", "record_id = ?", [id], (r) => r.record_id === id)) await cs.set("claim", c.id as string, "record_id", twinId);
+  if (twin.status === "announced" && gone.status === "heard") await cs.set("site", twinId, "status", "heard");
+  for (const f of ["name", "nac", "rfss", "site"] as const) if (twin[f] == null || twin[f] === "") if (gone[f] != null && gone[f] !== "") await cs.set("site", twinId, f, gone[f]);
+  await cs.set("site", id, "status", "merged");
+  await cs.set("site", id, "merged_into", twinId);
+  await cs.create("redirect", { id, new_id: twinId });
+}
+
+/**
+ * A system's own sites that are one site (sites.ts), recorded twice: a share
+ * that named neither (a recorder's first share after an import, before site
+ * IDs), before its sites could be matched within the system. The one first
+ * heard is kept; the other redirects to it. Returns the sites merged away.
+ */
+export async function mergeSiteTwins(db: Db, systemId: string, info: Omit<ChangeSetInfo, "kind">): Promise<string[]> {
+  const cs = new ChangeSet(db, { ...info, kind: "merge", note: "the same site, recorded twice" });
+  const sites = (await withControl(cs, await cs.query("site", "system_id = ?", [systemId], (r) => r.system_id === systemId)))
+    .filter((s) => s.status === "heard" || s.status === "announced")
+    .sort((a, b) => ((a.first_heard as number) ?? Infinity) - ((b.first_heard as number) ?? Infinity) || String(a.id).localeCompare(String(b.id)));
+  const gone: string[] = [];
+  for (const [i, s] of sites.entries()) {
+    if (gone.includes(s.id as string)) continue;
+    for (const t of sites.slice(i + 1)) {
+      if (gone.includes(t.id as string) || !sameSite(s, t)) continue;
+      await absorbSite(cs, t, s);
+      // What it had is the kept one's now (a third may match on it).
+      s.controlHz = [...new Set([...s.controlHz, ...t.controlHz])];
+      gone.push(t.id as string);
+    }
+  }
+  if (!gone.length) return [];
+  cs.bump(systemId);
+  await cs.commit();
+  await reindex(db, systemId);
+  return gone;
 }
