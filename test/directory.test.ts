@@ -26,7 +26,6 @@ test("a share makes a system with its sites, frequencies, licenses and talkgroup
   assert.equal(s.sites.length, 1);
   assert.deepEqual(s.sites[0].controlChannelsHz, [857_987_500]);
   assert.deepEqual(s.sites[0].voiceChannelsHz, [858_987_500]);
-  assert.equal(s.sites[0].heardCells, 1);
   assert.deepEqual(s.licenses["859087500"], { callSign: "KNJA391", name: "", source: "air" });
   assert.equal(s.licenses["857987500"].callSign, "WPXT459");
   const tgs = (await d.get(`/systems/${id}/talkgroups`)).json.talkgroups;
@@ -173,17 +172,6 @@ test("a quarantined recorder's shares and support stop counting; everything it d
   const r = await d.post(`/actors/${bad}/revert`, {});
   assert.equal(r.status, 200, JSON.stringify(r.json));
   assert.deepEqual((await d.get(`/systems/${a.json.system}/talkgroups`)).json.talkgroups.map((t: any) => [t.number, t.alpha]), [[100, "Dispatch"]]);
-});
-
-test("what's near: systems heard from cells in range, nearest and most heard first", async () => {
-  const d = directory();
-  const dc = await d.share(obs(recorder(), [p25Site(1, 1, 851_000_000)], { cell: DC }));
-  const o = obs(recorder(), [], { cell: DENVER, system: { type: "p25", name: "Denver", sites: [p25Site(1, 1, 852_000_000, { wacn: 0xbee02 })] } });
-  assert.equal((await d.share(o)).status, 201);
-  const near = (await d.get(`/systems?lat=38.88&lon=-77.1&radiusKm=30`)).json.systems;
-  assert.deepEqual(near.map((s: any) => s.id), [dc.json.system]);
-  assert.equal(near[0].sitesHeard, 1);
-  void ARLINGTON;
 });
 
 test("search by frequency, call sign, identity and words; a system exports as TRP's config", async () => {

@@ -75,7 +75,7 @@ test("the map: every placed site with its transmitters, and each county's count"
 
 test("near a point: systems with a transmitter in range, nearest first, with their transmitters", async () => {
   const { d, dcfd } = await twoSystems();
-  const r = (await d.get(`/nearby?cell=${latLngToCell(38.9, -77.03, 6)}&radiusKm=25`)).json;
+  const r = (await d.get(`/nearby?lat=38.9&lon=-77.03&radiusKm=25`)).json;
   assert.equal(r.systems.length, 2);
   const s = r.systems.find((x: any) => x.id === dcfd);
   assert.ok(s.distanceKm < 5);

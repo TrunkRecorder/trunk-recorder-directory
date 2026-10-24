@@ -1,8 +1,7 @@
 // Reading the directory: a system as it is (or was, at any version), its
-// talkgroups, what's near a place, search, history.
+// talkgroups, search, history. (What's near a place: explore.ts.)
 
 import { type Db, type Row, first, marks } from "./db.ts";
-import { cellCenter, cellOf, cellsWithin, distanceKm, validCell } from "./geo.ts";
 import { resolve } from "./share.ts";
 
 export interface SiteView {
@@ -21,8 +20,6 @@ export interface SiteView {
   neighbours: string[];
   firstHeard: number | null;
   lastHeard: number | null;
-  /** Cells it's heard from (by recorders that gave a location). */
-  heardCells: number;
 }
 
 export interface SystemView {
@@ -132,7 +129,7 @@ async function records(db: Db, id: string, rev?: number): Promise<Records | null
   return rev !== undefined && rev < (sys.rev as number) ? asOf(db, id, rev) : current(db, id);
 }
 
-function systemView(recs: Records, heard: Map<string, number>): SystemView | null {
+function systemView(recs: Records): SystemView | null {
   const s = [...recs.get("system")!.values()][0];
   if (!s) return null;
   const freqs = [...recs.get("freq")!.values()];
@@ -154,7 +151,6 @@ function systemView(recs: Records, heard: Map<string, number>): SystemView | nul
       neighbours: [...recs.get("neighbour")!.values()].filter((n) => n.site_id === x.id).map((n) => n.neighbour_id as string),
       firstHeard: x.first_heard as number | null,
       lastHeard: x.last_heard as number | null,
-      heardCells: heard.get(x.id as string) ?? 0,
     }))
     .sort((a, b) => (a.rfss ?? 999) - (b.rfss ?? 999) || (a.site ?? 999) - (b.site ?? 999) || a.id.localeCompare(b.id));
   // The best license on each frequency: the user's, then the air's, then a lookup's.
@@ -182,17 +178,11 @@ function systemView(recs: Records, heard: Map<string, number>): SystemView | nul
   };
 }
 
-async function heardCells(db: Db, siteIds: string[]): Promise<Map<string, number>> {
-  if (!siteIds.length) return new Map();
-  const rows = await db.all<{ record_id: string; n: number }>(`SELECT record_id, COUNT(*) AS n FROM geo_cells WHERE source = 'heard' AND record_id IN (${marks(siteIds.length)}) GROUP BY record_id`, siteIds);
-  return new Map(rows.map((r) => [r.record_id, r.n]));
-}
-
 /** A system, as it is or was at version `rev`. Null: no such system. A merged one says what it went into. */
 export async function getSystem(db: Db, id: string, rev?: number): Promise<SystemView | null> {
   const recs = await records(db, id, rev);
   if (!recs) return null;
-  return systemView(recs, await heardCells(db, [...recs.get("site")!.keys()]));
+  return systemView(recs);
 }
 
 /** A system's talkgroups (active and heard-not-named), with where each is heard and other names people gave. */
@@ -289,52 +279,6 @@ export function trpSystem(s: SystemView, sites?: string[], licensee = ""): Recor
       directoryId: x.id,
     })),
   };
-}
-
-export interface NearResult {
-  id: string;
-  name: string;
-  type: string;
-  /** Sites heard from the cells searched. */
-  sitesHeard: number;
-  /** How far its nearest heard cell is, km. */
-  distanceKm: number;
-  talkgroupCount: number;
-  lastHeard: number | null;
-}
-
-/** Systems heard in range of a point: ranked by how much of it is heard near, then how near. */
-export async function near(db: Db, at: { cell?: string | null; lat?: number; lon?: number }, radiusKm: number): Promise<NearResult[]> {
-  const cell = validCell(at.cell) ?? (at.lat !== undefined && at.lon !== undefined ? cellOf(at.lat, at.lon) : null);
-  if (!cell) return [];
-  const centre = cellCenter(cell);
-  const cells = cellsWithin(cell, radiusKm);
-  const hits = new Map<string, { sites: Set<string>; dist: number }>();
-  for (let i = 0; i < cells.length; i += 90) {
-    const some = cells.slice(i, i + 90);
-    for (const r of await db.all<{ cell: string; system_id: string; site_id: string }>(
-      `SELECT g.cell, s.system_id, s.id AS site_id FROM geo_cells g JOIN sites s ON s.id = g.record_id
-        WHERE g.cell IN (${marks(some.length)}) AND g.record_kind = 'site'`,
-      some,
-    )) {
-      const sys = await resolve(db, r.system_id);
-      const d = distanceKm(centre, cellCenter(r.cell));
-      if (d > radiusKm + 4) continue;
-      const e = hits.get(sys) ?? { sites: new Set<string>(), dist: Infinity };
-      e.sites.add(r.site_id);
-      e.dist = Math.min(e.dist, d);
-      hits.set(sys, e);
-    }
-  }
-  const out: NearResult[] = [];
-  for (const [id, h] of hits) {
-    const s = await first<Row>(db, "SELECT id, name, type, status FROM systems WHERE id = ?", [id]);
-    if (!s || s.status !== "active") continue;
-    const n = await first<{ n: number; last: number | null }>(db, "SELECT COUNT(*) AS n, MAX(last_heard) AS last FROM talkgroups WHERE system_id = ? AND status IN ('active', 'heard')", [id]);
-    const last = await first<{ last: number | null }>(db, "SELECT MAX(last_heard) AS last FROM sites WHERE system_id = ?", [id]);
-    out.push({ id, name: s.name as string, type: s.type as string, sitesHeard: h.sites.size, distanceKm: Math.round(h.dist * 10) / 10, talkgroupCount: n?.n ?? 0, lastHeard: last?.last ?? null });
-  }
-  return out.sort((a, b) => b.sitesHeard - a.sitesHeard || a.distanceKm - b.distanceKm);
 }
 
 export interface SearchHit {

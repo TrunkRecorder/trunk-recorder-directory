@@ -18,9 +18,11 @@
 // isn't placed, and placements says why.
 
 import { type Db, type Row, insertRows, marks } from "./db.ts";
-import { distanceKm } from "./geo.ts";
+import { cellOf, distanceKm, regionOf } from "./geo.ts";
+import type { Observation } from "./observation.ts";
 import type { Places } from "./places.ts";
-import { reindex } from "./share.ts";
+import { callSignClaim } from "./claims.ts";
+import { claim, reindex } from "./share.ts";
 import { ChangeSet } from "./store.ts";
 
 const HALF_CHANNEL = 3125;
@@ -44,7 +46,7 @@ export interface Transmitter {
   control: boolean;
 }
 
-interface FccRow {
+export interface FccRow {
   call_sign: string;
   licensee_name: string | null;
   freq_center_hz: number;
@@ -104,6 +106,55 @@ export function choose(rows: FccRow[], control: number[], all: number[], known: 
   return { transmitters: mine.map(({ freqs: _f, calls: _c, mineToo: _m, ...t }) => t), note: "" };
 }
 
+/** The licensed transmitters of call signs `callSigns` (bases and repeaters): fetched once for a system's sites. */
+export async function rowsOf(fcc: Db, callSigns: string[]): Promise<FccRow[]> {
+  const some = [...new Set(callSigns)].slice(0, 50);
+  return some.length ? fcc.all<FccRow>(`SELECT ${COLS} FROM transmitter WHERE call_sign IN (${marks(some.length)}) AND ${BASE}`, some) : [];
+}
+
+/**
+ * A site's transmitters: the licensed spots on its frequencies (`control`
+ * its control channels, `all` every frequency it uses), by the system's call
+ * signs (`byCall`: their rows; `callSigns`) and every base station on its
+ * frequencies. Placing a system, and finding the region a share is from, both
+ * ask this.
+ */
+export async function locate(fcc: Db, control: number[], all: number[], byCall: FccRow[], callSigns: string[]): Promise<ReturnType<typeof choose>> {
+  const rows = byCall.slice();
+  for (const f of all.slice(0, MAX_FREQS)) rows.push(...(await fcc.all<FccRow>(`SELECT ${COLS} FROM transmitter WHERE freq_center_hz BETWEEN ? AND ? AND ${BASE}`, [f - HALF_CHANNEL, f + HALF_CHANNEL])));
+  return choose(rows, control, all, new Set(callSigns));
+}
+
+/**
+ * Where a share is from, by its towers, not its recorder: the region of the
+ * licensed transmitters its sites' frequencies match (as placing them would),
+ * and every call sign it has (its licenses, those heard on the air, its
+ * towers'). Its weak identities (a default WACN, a SmartNet System ID) are
+ * matched in that region, its call signs anywhere. Null region: no tower found.
+ */
+export async function shareTowers(fcc: Db, obs: Observation): Promise<{ region: string | null; callSigns: string[] }> {
+  const raster = (hz: number) => Math.round(hz / 6250) * 6250;
+  const own = [
+    ...Object.values(obs.system.fcc ?? {}).map((l) => l.callSign),
+    ...obs.system.sites.flatMap((x) => (x.heard?.callSigns ?? []).map((c) => c.callSign)),
+  ].map((c) => c.toUpperCase());
+  const byCall = await rowsOf(fcc, own);
+  const at: [number, number][] = [];
+  const found = new Set(own);
+  for (const site of obs.system.sites) {
+    const control = site.controlChannelsHz.map(raster);
+    const all = [...new Set([...control, ...(site.voiceChannelsHz ?? []).map(raster), ...(site.heard?.voice ?? []).map((v) => raster(v.freqHz))])];
+    if (!control.length) continue;
+    const r = await locate(fcc, control, all, byCall, own);
+    for (const t of r.transmitters) {
+      at.push([t.lat, t.lon]);
+      found.add(t.callSign);
+    }
+  }
+  const region = at.length ? regionOf(cellOf(at.reduce((a, p) => a + p[0], 0) / at.length, at.reduce((a, p) => a + p[1], 0) / at.length)) : null;
+  return { region, callSigns: [...found].filter(Boolean).sort() };
+}
+
 export interface PlaceResult {
   placed: string[];
   unplaced: { site: string; note: string }[];
@@ -118,13 +169,14 @@ export async function placeSystem(db: Db, fcc: Db, places: Places, systemId: str
   const now = opts.now ?? Date.now();
   const out: PlaceResult = { placed: [], unplaced: [] };
   const sites = await db.all<Row>("SELECT id, lat, lon FROM sites WHERE system_id = ? AND status IN ('heard', 'announced')", [systemId]);
+  const type = ((await db.all<Row>("SELECT type FROM systems WHERE id = ?", [systemId]))[0]?.type as string) ?? "";
   if (!sites.length) return out;
   const ids = sites.map((s) => s.id as string);
   const freqRows = await db.all<{ site_id: string; freq_hz: number; use: string }>(`SELECT site_id, freq_hz, use FROM site_freqs WHERE site_id IN (${marks(ids.length)})`, ids);
   const was = new Map((await db.all<Row>(`SELECT * FROM placements WHERE site_id IN (${marks(ids.length)})`, ids)).map((p) => [p.site_id as string, p]));
   const licenses = await db.all<Row>("SELECT id, freq_hz, call_sign, name, source FROM fcc_licenses WHERE system_id = ?", [systemId]);
   const callSigns = [...new Set(licenses.map((l) => l.call_sign as string))].slice(0, 50);
-  const byCall: FccRow[] = callSigns.length ? await fcc.all<FccRow>(`SELECT ${COLS} FROM transmitter WHERE call_sign IN (${marks(callSigns.length)}) AND ${BASE}`, callSigns) : [];
+  const byCall = await rowsOf(fcc, callSigns);
 
   const cs = new ChangeSet(db, { actorKind: "system", actorId: "fcc", kind: "edit", note: "placed from FCC licenses" }, now);
   const stmts: { sql: string; params: unknown[] }[] = [];
@@ -141,10 +193,7 @@ export async function placeSystem(db: Db, fcc: Db, places: Places, systemId: str
       continue;
     }
     if (!control.length) continue;
-    // The system's licenses' spots, and every base station on its frequencies (the fingerprint).
-    const rows = byCall.slice();
-    for (const f of all) rows.push(...(await fcc.all<FccRow>(`SELECT ${COLS} FROM transmitter WHERE freq_center_hz BETWEEN ? AND ? AND ${BASE}`, [f - HALF_CHANNEL, f + HALF_CHANNEL])));
-    const r = choose(rows, control, all, new Set(callSigns));
+    const r = await locate(fcc, control, all, byCall, callSigns);
     const method = r.transmitters.some((t) => callSigns.includes(t.callSign)) ? "call_sign" : "fingerprint";
     stmts.push({ sql: "DELETE FROM site_transmitters WHERE site_id = ?", params: [id] });
     stmts.push({ sql: "INSERT OR REPLACE INTO placements (site_id, at, method, note, freqs) VALUES (?, ?, ?, ?, ?)", params: [id, now, r.transmitters.length ? method : "none", r.note, key] });
@@ -168,6 +217,11 @@ export async function placeSystem(db: Db, fcc: Db, places: Places, systemId: str
     }
     placed.push({ lat, lon });
     out.placed.push(id);
+    // Its towers' call signs are the system's too: a share naming one finds it.
+    for (const c of new Set(r.transmitters.map((t) => t.callSign))) {
+      const k = callSignClaim(type, c);
+      if (k) await claim(cs, [k], "system", systemId);
+    }
     // The licenses it found: kept as the system's (a lookup's never replaces the air's or a person's).
     for (const t of r.transmitters.filter((x) => x.control)) {
       const f = Math.round(t.freqHz / 6250) * 6250;
@@ -204,3 +258,20 @@ export async function placeSystem(db: Db, fcc: Db, places: Places, systemId: str
 }
 
 const round = (v: number) => Math.round(v * 1e5) / 1e5;
+
+/**
+ * Other systems of system `systemId`'s type whose transmitters are its own
+ * (the same licensed tower, under the same call sign): the same system, found
+ * twice (shared before either named the other). Merged after placing.
+ */
+export async function sameTowers(db: Db, systemId: string): Promise<string[]> {
+  const rows = await db.all<{ id: string }>(
+    `SELECT DISTINCT y2.id FROM site_transmitters a JOIN sites s1 ON s1.id = a.site_id JOIN systems y1 ON y1.id = s1.system_id
+       JOIN site_transmitters b ON b.call_sign = a.call_sign AND ROUND(b.lat, 4) = ROUND(a.lat, 4) AND ROUND(b.lon, 4) = ROUND(a.lon, 4)
+       JOIN sites s2 ON s2.id = b.site_id JOIN systems y2 ON y2.id = s2.system_id
+      WHERE s1.system_id = ? AND y2.id != y1.id AND y2.type = y1.type AND y2.status = 'active'
+        AND (y1.wacn IS NULL OR y2.wacn IS NULL OR y1.wacn = y2.wacn) AND (y1.sys_id IS NULL OR y2.sys_id IS NULL OR y1.sys_id = y2.sys_id)`,
+    [systemId],
+  );
+  return rows.map((r) => r.id);
+}

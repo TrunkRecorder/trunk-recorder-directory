@@ -110,7 +110,6 @@ describe("the API, reading", () => {
   });
 
   test("near, search, identify answer; unknown things are 404s", async () => {
-    assert.ok(Array.isArray((await call("GET", "/systems?lat=38.9&lon=-77.03&radiusKm=50")).json.systems));
     assert.ok(Array.isArray((await call("GET", "/search?q=857.9875")).json.hits));
     assert.ok(Array.isArray((await call("GET", "/identify?claim=p25:bee00.1")).json.matches));
     assert.equal((await call("GET", "/systems/sys_00000000000")).status, 404);

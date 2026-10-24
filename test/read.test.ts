@@ -51,18 +51,6 @@ test("search: a frequency exactly or by prefix, words with prefixes, nothing for
   assert.deepEqual((await d.get("/search?q=716")).json.hits, [], "a bare number needs a system");
 });
 
-test("near: by radius, cells, and only systems shown (merged and hidden ones aren't)", async () => {
-  const d = directory();
-  const dc = await d.share(obs(recorder(), [p25Site(1, 1, 851e6)], { cell: DC }));
-  const den = await d.share(obs(recorder(), [p25Site(1, 1, 851e6, { wacn: 0xbee03 })], { cell: DENVER }));
-  assert.deepEqual((await d.get(`/systems?cell=${DC}&radiusKm=10`)).json.systems.map((s: any) => s.id), [dc.json.system]);
-  assert.deepEqual((await d.get(`/systems?lat=39.74&lon=-104.99&radiusKm=10`)).json.systems.map((s: any) => s.id), [den.json.system]);
-  assert.deepEqual((await d.get(`/systems?lat=0&lon=0&radiusKm=50`)).json.systems, []);
-  assert.deepEqual((await d.get(`/systems`)).json.systems, [], "no place: nothing");
-  await d.post(`/systems/${dc.json.system}/hide`, {});
-  assert.deepEqual((await d.get(`/systems?cell=${DC}&radiusKm=10`)).json.systems, []);
-});
-
 test("talkgroups for part of a system: heard at those sites, everywhere, or nowhere yet", async () => {
   const d = directory();
   const a = await d.share(obs(recorder(), [p25Site(1, 1, 851e6), p25Site(1, 2, 852e6)], {
@@ -83,8 +71,8 @@ test("TRP's config: modulation it knows, band plan in its terms, licenses not th
     id: "sys_x", rev: 3, type: "smartnet", name: "Big County!", wacn: null, sysId: 0x1234, status: "active", mergedInto: null, lat: null, lon: null, createdAt: 0, updatedAt: 0, talkgroupCount: 0,
     licenses: { "851000000": { callSign: "WAAA111", name: "", source: "user" }, "852000000": { callSign: "WBBB222", name: "B", source: "air" } },
     sites: [
-      { id: "site_a", name: "", rfss: null, site: null, nac: null, status: "heard", modulation: "fm", bandplan: { bandplan: "800_reband" }, lat: null, lon: null, controlChannelsHz: [851e6], voiceChannelsHz: [], neighbours: [], firstHeard: 0, lastHeard: 0, heardCells: 0 },
-      { id: "site_b", name: "", rfss: null, site: null, nac: null, status: "retired", modulation: "qpsk", bandplan: null, lat: null, lon: null, controlChannelsHz: [852e6], voiceChannelsHz: [], neighbours: [], firstHeard: 0, lastHeard: 0, heardCells: 0 },
+      { id: "site_a", name: "", rfss: null, site: null, nac: null, status: "heard", modulation: "fm", bandplan: { bandplan: "800_reband" }, lat: null, lon: null, controlChannelsHz: [851e6], voiceChannelsHz: [], neighbours: [], firstHeard: 0, lastHeard: 0 },
+      { id: "site_b", name: "", rfss: null, site: null, nac: null, status: "retired", modulation: "qpsk", bandplan: null, lat: null, lon: null, controlChannelsHz: [852e6], voiceChannelsHz: [], neighbours: [], firstHeard: 0, lastHeard: 0 },
     ],
   } as never;
   const c = trpSystem(sys) as any;

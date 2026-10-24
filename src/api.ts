@@ -9,14 +9,13 @@ import { type Db, type Row, first } from "./db.ts";
 import { newId } from "./ids.ts";
 import { keeper, mergeSystems } from "./merge.ts";
 import { NameIndex } from "./names.ts";
-import { Invalid, parseObservation } from "./observation.ts";
-import { changeset, diff, getSystem, getTalkgroups, history, near, search, talkgroupsCsv, trpSystem } from "./read.ts";
+import { Invalid, parseObservation, type Observation } from "./observation.ts";
+import { changeset, diff, getSystem, getTalkgroups, history, search, talkgroupsCsv, trpSystem } from "./read.ts";
 import { city, county, countyCounts, mapSites, nearby, parseTypes, placesNamed, sharedCallSigns, state, states, where } from "./explore.ts";
-import { cellCenter, validCell } from "./geo.ts";
-import { placeSystem } from "./place.ts";
+import { placeSystem, sameTowers, shareTowers } from "./place.ts";
 import type { Places } from "./places.ts";
 import { revertActor, revertChangeset, revertSystemTo } from "./revert.ts";
-import { applyShare, matchShare, reindex, resolve } from "./share.ts";
+import { applyShare, matchShare, ownCallSigns, reindex, resolve, type ShareFrom } from "./share.ts";
 import { ChangeSet, type KindName, PREFIX_KIND } from "./store.ts";
 
 export const BASE = "/directory/api/v1";
@@ -30,9 +29,24 @@ export interface Env {
   /** ArgusRF's FCC database (read only) and the Census boundaries: for placing sites (place.ts). */
   fcc?: Db;
   places?: Places;
+  /** Where a share is from (its towers' region, its call signs): place.ts shareTowers over `fcc`, unless given. */
+  towersOf?: (obs: Observation) => Promise<ShareFrom>;
 }
 
 const MAX_BODY = 4 << 20;
+
+/** Place a system's sites; another record on its very towers is this system, found twice: merged into one. */
+async function placeJoining(db: Db, fcc: Db, places: Places, systemId: string, opts: { now: number; force?: boolean }) {
+  const placed = await placeSystem(db, fcc, places, systemId, opts);
+  const merged: string[] = [];
+  for (const twin of await sameTowers(db, systemId)) {
+    const why = "its licensed towers are this one's";
+    const [keep, gone] = await keeper(db, systemId, twin);
+    systemId = (await mergeSystems(db, keep, gone, { actorKind: "system", actorId: "matcher", note: why }, why)).kept;
+    merged.push(gone);
+  }
+  return { ...placed, systemId, merged };
+}
 
 export function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -85,10 +99,6 @@ export async function handle(env: Env, req: Request): Promise<Response> {
       return new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "content-type, authorization", "access-control-allow-methods": "GET, POST, DELETE, OPTIONS" } });
     }
     if (req.method === "GET") {
-      if (path === "/systems") {
-        const radius = Math.min(num(q.get("radiusKm")) ?? 50, 250);
-        return json({ systems: await near(db, { cell: q.get("cell"), lat: num(q.get("lat")), lon: num(q.get("lon")) }, radius) });
-      }
       let r = m(/^\/systems\/(sys_[0-9a-z]+)$/);
       if (r) {
         const id = await systemOr301(env, r[1], url);
@@ -192,13 +202,13 @@ export async function handle(env: Env, req: Request): Promise<Response> {
       // (The licensed layer itself is the site's files, by 1° cell: scripts/licensed.ts.)
       if (path === "/map/callsigns") return json({ callSigns: await sharedCallSigns(db) });
       if (path === "/nearby") {
-        // A coarse cell (what the page sends: ~3 km), or a point.
-        const cell = validCell(q.get("cell"));
-        const at: [number, number] | null = cell ? cellCenter(cell) : num(q.get("lat")) !== undefined && num(q.get("lon")) !== undefined ? [num(q.get("lat"))!, num(q.get("lon"))!] : null;
-        if (!at) return err(400, "cell, or lat and lon");
+        // A point (the page sends one rounded to ~3 km: coarse=1), looked around, not kept.
+        const lat = num(q.get("lat"));
+        const lon = num(q.get("lon"));
+        if (lat === undefined || lon === undefined) return err(400, "lat and lon");
+        const at: [number, number] = [lat, lon];
         const radius = Math.min(num(q.get("radiusKm")) ?? 50, 250);
-        // (A rough place: a little further, so what's in range of the real one is in.)
-        return json({ at, systems: await nearby(db, at, radius + (cell || q.get("coarse") === "1" ? 4 : 0), types) });
+        return json({ at, systems: await nearby(db, at, radius + (q.get("coarse") === "1" ? 4 : 0), types) });
       }
       if (path === "/identify") {
         const claim = (q.get("claim") ?? "").toLowerCase();
@@ -267,12 +277,16 @@ export async function handle(env: Env, req: Request): Promise<Response> {
     r = m(/^\/systems\/(sys_[0-9a-z]+)\/place$/);
     if (req.method === "POST" && r) {
       if (!env.fcc || !env.places) return err(400, "no FCC database here");
-      return json(await placeSystem(db, env.fcc, env.places, await resolve(db, r[1]), { now: env.now?.() ?? Date.now(), force: true }));
+      return json(await placeJoining(db, env.fcc, env.places, await resolve(db, r[1]), { now: env.now?.() ?? Date.now(), force: true }));
     }
     if (req.method === "POST" && path === "/place") {
       if (!env.fcc || !env.places) return err(400, "no FCC database here");
       const out: Record<string, unknown> = {};
-      for (const s of await db.all<Row>("SELECT id FROM systems WHERE status = 'active'")) out[s.id as string] = await placeSystem(db, env.fcc, env.places, s.id as string, { now: env.now?.() ?? Date.now(), force: q.get("force") === "1" });
+      for (const s of await db.all<Row>("SELECT id FROM systems WHERE status = 'active'")) {
+        // One merged into an earlier one's twin is placed with it.
+        if ((await first(db, "SELECT status FROM systems WHERE id = ?", [s.id]))?.status !== "active") continue;
+        out[s.id as string] = await placeJoining(db, env.fcc, env.places, s.id as string, { now: env.now?.() ?? Date.now(), force: q.get("force") === "1" });
+      }
       return json({ systems: out });
     }
     r = m(/^\/systems\/(sys_[0-9a-z]+)\/(hide|unhide|retire)$/);
@@ -301,14 +315,16 @@ async function share(env: Env, req: Request): Promise<Response> {
   const key = `${new Date(now).toISOString().slice(0, 10)}/${id}.json`;
   await env.putObservation(key, JSON.stringify(obs));
   if (quarantined) {
-    await db.batch([{ sql: "INSERT INTO observations (id, recorder_id, at, app_version, cell, r2_key, status) VALUES (?, ?, ?, ?, ?, ?, 'quarantined')", params: [id, obs.recorder, now, obs.app, obs.cell ?? null, key] }]);
+    await db.batch([{ sql: "INSERT INTO observations (id, recorder_id, at, app_version, r2_key, status) VALUES (?, ?, ?, ?, ?, 'quarantined')", params: [id, obs.recorder, now, obs.app, key] }]);
     // (Answered as if taken: a quarantined recorder isn't told.)
     return json({ observation: id, system: obs.directory?.id ?? null, rev: obs.directory?.rev ?? 0, sites: [], created: false, merged: [] }, 202);
   }
+  // Where it's from, by its towers (never its recorder): the region its weak identities match in, and its call signs.
+  const from = env.towersOf ? await env.towersOf(obs) : env.fcc ? await shareTowers(env.fcc, obs).catch(() => ownCallSigns(obs)) : ownCallSigns(obs);
   // Decisive evidence that it's of two systems: merge them first, so the share lands on one.
   const merged: string[] = [];
   for (let i = 0; i < 4; i++) {
-    const m = await matchShare(db, obs);
+    const m = await matchShare(db, obs, from);
     const dec = m.mergeWith.filter((w) => w.decisive);
     if (!m.systemId || !dec.length) break;
     let into = m.systemId;
@@ -318,7 +334,7 @@ async function share(env: Env, req: Request): Promise<Response> {
       merged.push(gone);
     }
   }
-  const res = await applyShare(db, obs, id, now);
+  const res = await applyShare(db, obs, id, now, from);
   let systemId = res.systemId;
   for (const w of res.mergeWith) {
     if (w.decisive) {
@@ -334,12 +350,14 @@ async function share(env: Env, req: Request): Promise<Response> {
   // Where its sites are, from the FCC licenses on their frequencies (a failure here doesn't fail the share).
   if (env.fcc && env.places) {
     try {
-      await placeSystem(db, env.fcc, env.places, systemId, { now });
+      const p = await placeJoining(db, env.fcc, env.places, systemId, { now });
+      systemId = p.systemId;
+      merged.push(...p.merged);
     } catch (e) {
       console.warn(`placing ${systemId}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
-  await db.batch([{ sql: "INSERT INTO observations (id, recorder_id, at, app_version, cell, system_id, base_rev, r2_key, status, changeset_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'applied', ?)", params: [id, obs.recorder, now, obs.app, obs.cell ?? null, systemId, obs.directory?.rev ?? null, key, res.changesetId] }]);
+  await db.batch([{ sql: "INSERT INTO observations (id, recorder_id, at, app_version, system_id, base_rev, r2_key, status, changeset_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'applied', ?)", params: [id, obs.recorder, now, obs.app, systemId, obs.directory?.rev ?? null, key, res.changesetId] }]);
   const sites = [];
   for (const s of res.sites) sites.push(await resolve(db, s));
   const rev = (await first<{ rev: number }>(db, "SELECT rev FROM systems WHERE id = ?", [systemId]))?.rev ?? res.rev;

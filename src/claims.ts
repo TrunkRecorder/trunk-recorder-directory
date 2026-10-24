@@ -1,8 +1,10 @@
 // What the air says, as keys that point at records (claims). The air's
 // identities aren't unique enough to be IDs: WACN BEE00 is a common default,
 // and SmartNet, DMR and NXDN system codes repeat across the country. So a weak
-// identity is scoped to a region (an H3 resolution-3 cell), and matched across
-// that region and the ones around it. docs/design.md, "Identifiers".
+// identity is scoped to a region (an H3 resolution-3 cell: where the system's
+// licensed towers are, never where a recorder is), and matched across that
+// region and the ones around it. An FCC call sign is strong and nationwide.
+// docs/design.md, "Identifiers".
 
 import { regionsNear } from "./geo.ts";
 import type { SiteIdentity } from "./observation.ts";
@@ -57,4 +59,14 @@ export function neighbourClaim(type: string, id: SiteIdentity, n: { sysId?: numb
   if (type !== "p25") return null;
   const sys = systemClaim(type, { ...id, sysId: n.sysId ?? id.sysId }, region);
   return sys && { store: sys.store.map((k) => `${k}/${n.rfss}.${n.site}`), lookup: sys.lookup.map((k) => `${k}/${n.rfss}.${n.site}`), strong: true };
+}
+
+/**
+ * A system's FCC call sign as a claim: strong, and nationwide (a call sign is
+ * one licensee's, wherever it's heard), of its type (a licensee can run a P25
+ * and an analog system on one license).
+ */
+export function callSignClaim(type: string, callSign: string): ClaimKeys | null {
+  const c = callSign.trim().toUpperCase();
+  return /^[A-Z0-9]{3,8}$/.test(c) ? keys(`fcc:${type}:${c}`, null, false, true) : null;
 }

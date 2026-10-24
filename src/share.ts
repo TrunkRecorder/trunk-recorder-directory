@@ -8,8 +8,7 @@
 // wrote is an assertion ([names.ts]) and only what they changed from the
 // version they imported counts. One share is one change set.
 
-import { regionOf, validCell, cellCenter } from "./geo.ts";
-import { type ClaimKeys, neighbourClaim, siteClaims, systemClaim } from "./claims.ts";
+import { type ClaimKeys, callSignClaim, neighbourClaim, siteClaims, systemClaim } from "./claims.ts";
 import { type Db, type Row, insertRows, marks } from "./db.ts";
 import { NameIndex } from "./names.ts";
 import type { Observation, ObservedSite, SiteIdentity } from "./observation.ts";
@@ -57,7 +56,7 @@ async function lookupClaims(cs: ChangeSet, claims: ClaimKeys[], kind: string): P
 }
 
 /** Make sure `record` has these claims, and count this observation on them. */
-async function claim(cs: ChangeSet, claims: ClaimKeys[], kind: string, recordId: string): Promise<void> {
+export async function claim(cs: ChangeSet, claims: ClaimKeys[], kind: string, recordId: string): Promise<void> {
   for (const key of claims.flatMap((c) => c.store)) {
     const have = await cs.query("claim", "key = ? AND record_id = ?", [key, recordId], (r) => r.key === key && r.record_id === recordId);
     const c = have[0] ?? (await cs.create("claim", { key, record_kind: kind, record_id: recordId, observations: 0, first_seen: cs.at }));
@@ -77,14 +76,29 @@ async function weakMatchHolds(cs: ChangeSet, siteId: string, id: SiteIdentity): 
   if (!site || site.status === "merged" || site.status === "retired") return false;
   const sys = await cs.get("system", await resolve(cs.db, site.system_id as string));
   if (!sys || sys.status !== "active") return false;
-  const differs = (a: unknown, b: unknown) => a != null && b != null && a !== b;
-  if (differs(sys.wacn, id.wacn) || differs(sys.sys_id, id.sysId)) return false;
+  if (!sameIdentity(sys, [id])) return false;
   if (differs(site.rfss, id.rfss) || differs(site.site, id.site)) return false;
   return true;
 }
 
+const differs = (a: unknown, b: unknown) => a != null && b != null && a !== b;
+
+/** Nothing the air says (WACN, System ID) has this system another one: a call sign, or towers, can say it's the same. */
+const sameIdentity = (sys: Record<string, unknown>, ids: SiteIdentity[]) => ids.every((id) => !differs(sys.wacn, id.wacn) && !differs(sys.sys_id, id.sysId));
+
+/** The systems a share's call signs name: strong, unless the air says they're another (a license can hold two systems). */
+async function byCallSign(cs: ChangeSet, type: string, callSigns: string[], ids: SiteIdentity[]): Promise<string[]> {
+  const claims = callSigns.map((c) => callSignClaim(type, c)).filter((c): c is ClaimKeys => !!c);
+  const out: string[] = [];
+  for (const h of claims.length ? await lookupClaims(cs, claims, "system") : []) {
+    const sys = await cs.get("system", h.id);
+    if (sys && sys.status === "active" && sameIdentity(sys, ids)) out.push(h.id);
+  }
+  return out;
+}
+
 /** Which system a share is of: by its directory link, its sites' claims, then its identity; and others found to be it. */
-async function findSystem(cs: ChangeSet, obs: Observation, region: string | null, ids: SiteIdentity[]) {
+async function findSystem(cs: ChangeSet, obs: Observation, region: string | null, ids: SiteIdentity[], callSigns: string[]) {
   // ── which system ──
   const mergeWith = new Map<string, { why: string; decisive: boolean }>();
   const evidence = (id: string, why: string, decisive: boolean) => {
@@ -129,15 +143,19 @@ async function findSystem(cs: ChangeSet, obs: Observation, region: string | null
     for (const s of sitesSystems) count.set(s.id, (count.get(s.id) ?? 0) + (s.strong ? 10 : 1));
     systemId = [...count.entries()].sort((a, b) => b[1] - a[1])[0][0];
   }
-  const sysClaims = ids.map((id) => systemClaim(type, id, region)).filter((c): c is ClaimKeys => !!c);
-  if (!systemId && sysClaims.length) systemId = (await lookupClaims(cs, sysClaims, "system"))[0]?.id ?? null;
+  const idClaims = ids.map((id) => systemClaim(type, id, region)).filter((c): c is ClaimKeys => !!c);
+  if (!systemId && idClaims.length) systemId = (await lookupClaims(cs, idClaims, "system"))[0]?.id ?? null;
+  const licensed = await byCallSign(cs, type, callSigns, ids);
+  if (!systemId) systemId = licensed[0] ?? null;
+  const sysClaims = [...idClaims, ...callSigns.map((c) => callSignClaim(type, c)).filter((c): c is ClaimKeys => !!c)];
   // Another system its sites (or identity, strongly) say it is: the same system, found twice.
   for (const s of sitesSystems) {
     if (systemId && s.id !== systemId) evidence(s.id, s.strong ? "a site of it, by its identity, is a site of this one" : "a site of it shares a control channel with this one, nearby", s.strong);
   }
-  for (const h of sysClaims.length ? await lookupClaims(cs, sysClaims, "system") : []) {
+  for (const h of idClaims.length ? await lookupClaims(cs, idClaims, "system") : []) {
     if (systemId && h.strong && h.id !== systemId) evidence(h.id, "the same system identity", true);
   }
+  for (const id of licensed) if (systemId && id !== systemId) evidence(id, "the same FCC call sign, and nothing on the air says otherwise", true);
 
   return { systemId, siteMatch, sysClaims, mergeWith };
 }
@@ -147,12 +165,23 @@ async function findSystem(cs: ChangeSet, obs: Observation, region: string | null
  * same one (decisive evidence: merged before it's applied, so it lands on one
  * system). Reads only.
  */
-export async function matchShare(db: Db, obs: Observation): Promise<{ systemId: string | null; mergeWith: { id: string; why: string; decisive: boolean }[] }> {
+/** Where a share is from, by its towers (place.ts shareTowers): the region its weak identities are matched in, and its call signs. */
+export interface ShareFrom {
+  region: string | null;
+  callSigns: string[];
+}
+
+/** A share's own call signs (its licenses, those heard on the air), when its towers aren't known (no FCC database). */
+export const ownCallSigns = (obs: Observation): ShareFrom => ({
+  region: null,
+  callSigns: [...Object.values(obs.system.fcc ?? {}).map((l) => l.callSign), ...obs.system.sites.flatMap((x) => (x.heard?.callSigns ?? []).map((c) => c.callSign))],
+});
+
+export async function matchShare(db: Db, obs: Observation, from: ShareFrom = ownCallSigns(obs)): Promise<{ systemId: string | null; mergeWith: { id: string; why: string; decisive: boolean }[] }> {
   const cs = new ChangeSet(db, { actorKind: "recorder", actorId: obs.recorder, kind: "share" });
-  const cell = validCell(obs.cell);
-  const region = cell ? regionOf(cell) : null;
+  const region = from.region;
   const ids = obs.system.sites.map(identityOf);
-  const m = await findSystem(cs, obs, region, ids);
+  const m = await findSystem(cs, obs, region, ids, from.callSigns);
   if (m.systemId) {
     // Neighbours announced with the same identity that are another system's sites.
     for (const [i, s] of obs.system.sites.entries()) {
@@ -174,10 +203,9 @@ export async function matchShare(db: Db, obs: Observation): Promise<{ systemId: 
  * evidence that another system is this one is returned for merging after
  * (merge.ts), as its own change set.
  */
-export async function applyShare(db: Db, obs: Observation, observationId: string, now = Date.now()): Promise<ShareResult & { mergeWith: { id: string; why: string; decisive: boolean }[] }> {
+export async function applyShare(db: Db, obs: Observation, observationId: string, now = Date.now(), from: ShareFrom = ownCallSigns(obs)): Promise<ShareResult & { mergeWith: { id: string; why: string; decisive: boolean }[] }> {
   const cs = new ChangeSet(db, { actorKind: "recorder", actorId: obs.recorder, kind: "share", observationId }, now);
-  const cell = validCell(obs.cell);
-  const region = cell ? regionOf(cell) : null;
+  const region = from.region;
   const type = obs.system.type;
   const ids = obs.system.sites.map(identityOf);
   /** Other systems found to be this one: decisive evidence merges them; the rest is proposed. */
@@ -187,7 +215,7 @@ export async function applyShare(db: Db, obs: Observation, observationId: string
     if (!had || (decisive && !had.decisive)) mergeWith.set(id, { why, decisive });
   };
 
-  const m = await findSystem(cs, obs, region, ids);
+  const m = await findSystem(cs, obs, region, ids, from.callSigns);
   let systemId = m.systemId;
   const { siteMatch, sysClaims } = m;
   for (const [k, v] of m.mergeWith) evidence(k, v.why, v.decisive);
@@ -195,10 +223,10 @@ export async function applyShare(db: Db, obs: Observation, observationId: string
   let created = false;
   if (!systemId) {
     const id0 = ids.find((i) => i.sysId != null) ?? {};
-    const at = cell ? cellCenter(cell) : null;
+    // (Where it is comes from its towers, when it's placed: never from a recorder.)
     const sys = await cs.create("system", {
       type, name: "", wacn: id0.wacn ?? null, sys_id: id0.sysId ?? null, status: "active", merged_into: null,
-      lat: at?.[0] ?? null, lon: at?.[1] ?? null, created_at: now, updated_at: now, rev: 0,
+      lat: null, lon: null, created_at: now, updated_at: now, rev: 0,
     });
     systemId = sys.id as string;
     created = true;
@@ -252,11 +280,6 @@ export async function applyShare(db: Db, obs: Observation, observationId: string
     for (const f of s.voiceChannelsHz ?? []) voice.set(raster(f), 0);
     for (const v of s.heard?.voice ?? []) voice.set(raster(v.freqHz), (voice.get(raster(v.freqHz)) ?? 0) + v.grants);
     for (const [f, g] of voice) await use(f, "voice", g);
-
-    // Where it's heard from.
-    if (cell) {
-      cs.raw(...insertRows("geo_cells", ["cell", "record_kind", "record_id", "source", "strength", "last_seen"], [[cell, "site", siteId, "heard", 1, now]], "ON CONFLICT (cell, record_id, source) DO UPDATE SET last_seen = excluded.last_seen, strength = strength + 1"));
-    }
 
     // Neighbours it announces: linked, as announced sites if no one has shared them.
     for (const n of s.heard?.neighbours ?? []) {

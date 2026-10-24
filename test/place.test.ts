@@ -92,3 +92,72 @@ test("the Census boundaries: DC, Arlington, and outside any city", async () => {
   assert.deepEqual(await p.at("MD", 38.7, -76.75), { state: "MD", county: "24033", place: "" });
   assert.deepEqual(await p.at("ZZ", 38.7, -76.75), { state: "ZZ", county: "", place: "" });
 });
+
+test("two recorders of WMATA, on control channels the other doesn't hear: one system, by its licensed call signs", async () => {
+  const d = directory({ place: true });
+  const voice = [489_087_500, 489_512_500, 496_612_500].map((freqHz) => ({ freqHz, grants: 3 }));
+  const site = (cc: number[]) => ({ controlChannelsHz: cc, heard: { controlChannelHz: cc[0], voice, neighbours: [], callSigns: [], good: 500, bad: 2 } });
+  const one = (cc: number[]) => d.share(obs(recorder(), [site(cc)], { system: { type: "smartnet", name: "", sites: [site(cc)] } }));
+  const a = await one([496_437_500, 490_862_500]);
+  const b = await one([496_537_500, 490_787_500]);
+  assert.equal(b.json.system, a.json.system, JSON.stringify(b.json));
+  assert.equal(b.json.created, false);
+  const claims = await d.db.all<any>("SELECT key FROM claims WHERE key LIKE 'fcc:%'");
+  assert.ok(claims.length >= 1 && claims.every((c) => c.key.startsWith("fcc:smartnet:")), JSON.stringify(claims));
+});
+
+test("a record found twice before call signs were claimed: once it's placed on the same towers, the two are one", async () => {
+  const d = directory({ place: true });
+  await d.share(obs(recorder(), [dcfd()]));
+  // As a record from before claims: nothing ties a new share to it but its towers.
+  d.db.raw.exec("DELETE FROM claims");
+  const b = await d.share(obs(recorder(), [dcfd()]));
+  assert.equal(b.json.merged.length, 1, JSON.stringify(b.json));
+  assert.equal((await d.db.all<any>("SELECT id FROM systems WHERE status = 'active'")).length, 1);
+  const h = (await d.get(`/systems/${b.json.system}/history`)).json.history;
+  assert.ok(h.some((e: any) => /licensed towers/.test(e.note ?? "")), JSON.stringify(h.map((e: any) => e.note)));
+});
+
+test("one license, two systems: a System ID the air says is another's keeps them apart, by call sign or by towers", async () => {
+  const d = directory({ place: true });
+  const a = await d.share(obs(recorder(), [dcfd()]));
+  const other = dcfd();
+  other.heard!.identity = { ...other.heard!.identity!, sysId: 0x446 };
+  other.expect = { ...other.expect!, sysId: 0x446 };
+  const b = await d.share(obs(recorder(), [other]));
+  assert.notEqual(b.json.system, a.json.system, JSON.stringify(b.json));
+  assert.deepEqual(b.json.merged, []);
+  assert.equal((await d.db.all<any>("SELECT id FROM systems WHERE status = 'active'")).length, 2);
+});
+test("a share is matched in its towers' region, not where its recorder is; and no recorder's place is kept", async () => {
+  const d = directory({ place: true });
+  // A default WACN (weak): matched only within a region. Two recorders far apart hear the same DC towers.
+  const site = () => {
+    const s = dcfd();
+    s.heard!.identity = { ...s.heard!.identity!, wacn: 0xbee00, sysId: 0x001 };
+    s.expect = { ...s.expect!, wacn: 0xbee00, sysId: 0x001 };
+    s.heard!.callSigns = [];
+    return s;
+  };
+  const a = await d.share({ ...obs(recorder(), [site()]), lat: 38.9, lon: -77.03 } as any);
+  const b = await d.share({ ...obs(recorder(), [site()]), lat: 39.74, lon: -104.99 } as any);
+  assert.equal(b.json.system, a.json.system);
+  const cols = (t: string) => d.db.all<any>(`PRAGMA table_info(${t})`).then((r) => r.map((c) => c.name));
+  assert.ok(!(await cols("observations")).includes("cell"));
+  assert.equal((await d.db.all<any>("SELECT name FROM sqlite_master WHERE name = 'geo_cells'")).length, 0);
+  for (const k of Object.values(d.kept)) assert.ok(!/"lat"|"cell"/.test(k), "the share as kept has no location");
+});
+
+test("placing again (admin) joins a record to its twin on the same towers", async () => {
+  const d = directory({ place: true });
+  const a = await d.share(obs(recorder(), [dcfd()]));
+  // As a record from before claims and placing.
+  d.db.raw.exec("DELETE FROM claims; DELETE FROM site_transmitters; DELETE FROM placements");
+  const b = await d.share(obs(recorder(), [dcfd()]));
+  assert.notEqual(b.json.system, a.json.system);
+  const r = await d.post(`/systems/${a.json.system}/place`, {});
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.json.merged, [b.json.system]);
+  assert.equal((await d.db.all<any>("SELECT id FROM systems WHERE status = 'active'")).length, 1);
+  assert.equal((await d.get(`/systems/${b.json.system}`)).status, 301);
+});
