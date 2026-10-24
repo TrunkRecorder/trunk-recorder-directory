@@ -128,6 +128,7 @@ export interface MapSite {
   site: string;
   system: string;
   name: string;
+  licensee: string;
   type: string;
   stale: boolean;
   at: [number, number][];

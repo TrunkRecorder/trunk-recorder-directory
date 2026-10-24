@@ -5,9 +5,11 @@
 
 import { type Db, type Row, first, marks } from "./db.ts";
 import { distanceKm } from "./geo.ts";
+import { licensedKind, TYPES, type LicensedKind } from "./kinds.ts";
 import { resolve } from "./share.ts";
 
-export const TYPES = ["p25", "smartnet", "dmr", "nxdn", "edacs"] as const;
+export { licensedKind, licensedShown, TYPES, type LicensedKind } from "./kinds.ts";
+
 /** A system with transmitters in this many counties of a state is listed as regional there, not under each county. */
 export const REGIONAL_COUNTIES = 4;
 /** A system not heard for this long is stale. */
@@ -44,7 +46,7 @@ async function summaries(db: Db, ids: string[], now: number, countiesIn?: string
               (SELECT MAX(s.last_heard) FROM sites s WHERE s.system_id = y.id) AS last_heard,
               (SELECT COUNT(*) FROM talkgroups t WHERE t.system_id = y.id AND t.status IN ('active', 'heard')) AS tgs,
               (SELECT COUNT(DISTINCT x.county) FROM site_transmitters x JOIN sites s ON s.id = x.site_id WHERE s.system_id = y.id AND x.county != '' ${countiesIn ? "AND x.state = ?" : ""}) AS counties,
-              (SELECT x.licensee FROM site_transmitters x JOIN sites s ON s.id = x.site_id WHERE s.system_id = y.id AND x.licensee != '' GROUP BY x.licensee ORDER BY COUNT(*) DESC LIMIT 1) AS licensee
+              y.licensee
          FROM systems y WHERE y.id IN (${marks(some.length)}) AND y.status = 'active'`,
       countiesIn ? [countiesIn, ...some] : some,
     );
@@ -156,6 +158,8 @@ export interface MapSite {
   site: string;
   system: string;
   name: string;
+  /** Who holds its licenses (shown for a system with no name yet). */
+  licensee: string;
   type: string;
   stale: boolean;
   /** Its transmitters: [lat, lon]. */
@@ -166,7 +170,7 @@ export interface MapSite {
 export async function mapSites(db: Db, types: string[], now = Date.now()): Promise<MapSite[]> {
   const t = typeSql(types);
   const rows = await db.all<Row>(
-    `SELECT s.id AS site, y.id AS system, y.name, y.type, s.last_heard, x.lat, x.lon, x.licensee
+    `SELECT s.id AS site, y.id AS system, y.name, y.licensee, y.type, s.last_heard, x.lat, x.lon
        FROM site_transmitters x JOIN sites s ON s.id = x.site_id JOIN systems y ON y.id = s.system_id
       WHERE y.status = 'active' AND s.status IN ('heard', 'announced') AND ${t.sql} ORDER BY s.id`,
     t.params,
@@ -176,7 +180,7 @@ export async function mapSites(db: Db, types: string[], now = Date.now()): Promi
     let e = by.get(r.site as string);
     if (!e) {
       const last = r.last_heard as number | null;
-      e = { site: r.site as string, system: r.system as string, name: (r.name as string) || (r.licensee as string) || "", type: r.type as string, stale: !last || now - last > STALE_MS, at: [] };
+      e = { site: r.site as string, system: r.system as string, name: r.name as string, licensee: r.licensee as string, type: r.type as string, stale: !last || now - last > STALE_MS, at: [] };
       by.set(e.site, e);
     }
     e.at.push([r.lat as number, r.lon as number]);
@@ -205,40 +209,6 @@ export interface Licensed {
   frequencies: number;
   /** What it likely is, by its licensed emissions (licensedKind). */
   kind: LicensedKind;
-}
-
-/** What a licensed system likely is: its digital mode, or analog FM (SmartNet, EDACS, LTR: emissions can't tell), or unknown. */
-export type LicensedKind = "p25" | "dmr" | "nxdn" | "analog" | "";
-
-/** Emission designators by what carries them (the bandwidth, then the modulation and what's sent). */
-const KIND_OF: [Exclude<LicensedKind, "">, RegExp][] = [
-  ["p25", /^(8K10F1[EDW]|8K70D1[EDW]|9K80D7[EDW]|9K70D7W)$/], // C4FM, LSM/CQPSK simulcast, Phase 2 H-DQPSK
-  ["dmr", /^7K60FX[EDW]$/],
-  ["nxdn", /^(4K00F1[EDW]|4K00F7W|8K30F1[EDW]|8K30F7W)$/], // 6.25 kHz (dPMR shares it), 12.5 kHz
-  ["analog", /F3E$/], // FM voice
-];
-
-/**
- * What a licensed system likely is, from its emissions (each frequency's
- * licensed emissions, comma separated): the digital mode on the most of its
- * frequencies; else analog FM; else unknown. A license often keeps analog
- * beside digital, so digital wins.
- */
-export function licensedKind(emissionsPerFrequency: (string | null)[]): LicensedKind {
-  const n: Record<string, number> = {};
-  for (const e of emissionsPerFrequency) {
-    const kinds = new Set<string>();
-    for (const code of (e ?? "").split(",")) for (const [k, re] of KIND_OF) if (re.test(code.trim().toUpperCase())) kinds.add(k);
-    for (const k of kinds) n[k] = (n[k] ?? 0) + 1;
-  }
-  const digital = (["p25", "dmr", "nxdn"] as const).filter((k) => n[k]).sort((a, b) => n[b] - n[a]);
-  return digital[0] ?? (n.analog ? "analog" : "");
-}
-
-/** Whether the type filter shows a licensed system of this kind (analog under SmartNet or EDACS; unknown only with every type). */
-export function licensedShown(kind: LicensedKind, types: string[]): boolean {
-  if (kind === "analog") return types.includes("smartnet") || types.includes("edacs");
-  return kind ? types.includes(kind) : types.length === TYPES.length;
 }
 
 /**

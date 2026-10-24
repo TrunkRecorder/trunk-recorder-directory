@@ -101,7 +101,7 @@ and is rate-limited. Stewards' and admins' actions need `ADMIN_TOKEN` (bearer) u
 | `GET /systems?lat=&lon=&radiusKm=` (or `cell=`, an H3 resolution-6 cell) | Systems heard in range |
 | `GET /systems/{id}[?rev=]` | A system (as it was at a version); a merged ID redirects (301) to the system it went into |
 | `GET /systems/{id}/talkgroups[.csv][?rev=&sites=]` | Its talkgroups, with where each is heard and the other names people gave; `sites=`: what's heard there |
-| `GET /systems/{id}/config[?sites=]` | Ready for TRP: its `System` (with `directory: {id, rev}`) and talkgroup CSV |
+| `GET /systems/{id}/config[?sites=&download=1]` | Ready for TRP: a bundle (`format: "trp-system"`, `v: 1`): its `System` (with `directory: {id, rev}`; an unnamed one's short name from its licensee), its named talkgroups as `talkgroupsCsv`, and `source` (this directory, its ID, version, licensee). TRP opens it from `#import=<this URL>` links (the site's "Open in Trunk Recorder Pro") or as a file (Setup → Import…) |
 | `GET /systems/{id}/history`, `GET /systems/{id}/diff?from=&to=`, `GET /changesets/{id}` | Versions, a diff between two, one version's changes |
 | `GET /search?q=[&system=&types=]` | By frequency (`857.9875`), call sign, identity (`BEE00.3A9`), talkgroup number in a system, or words (names, licensees); and `places`: a name, "City, ST", "City, State" or a ZIP code, each with a point |
 | `GET /places`, `/places/{ST}`, `/places/{ST}/{county}`, `/places/{ST}/{county}/{place}` | By place: states with counts by type; a state's counties and regional systems; a county's systems and cities; a city's systems (Census GEOIDs) |

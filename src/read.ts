@@ -258,10 +258,11 @@ export function talkgroupsCsv(tgs: TalkgroupView[]): string {
   return rows.join("\n") + "\n";
 }
 
-/** A system as TRP's config has one (with its directory link), ready to add. */
-export function trpSystem(s: SystemView, sites?: string[]): Record<string, unknown> {
+/** A system as TRP's config has one (with its directory link), ready to add. `licensee`: who holds most of its licenses (an unnamed system's short name). */
+export function trpSystem(s: SystemView, sites?: string[], licensee = ""): Record<string, unknown> {
   const pick = sites?.length ? s.sites.filter((x) => sites.includes(x.id)) : s.sites.filter((x) => x.status !== "retired");
-  const slug = (s.name || s.id).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24) || "system";
+  // Its short name: from its name, else who holds its licenses ("district-of-columbia"), else its ID.
+  const slug = (s.name || licensee || s.id).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24).replace(/-+$/, "") || "system";
   return {
     shortName: slug,
     ...(s.name ? { name: s.name } : {}),
@@ -352,7 +353,7 @@ export async function search(db: Db, q: string, opts: { system?: string; limit?:
   const names = new Map<string, string>();
   const nameOf = async (id: string) => {
     // (Unnamed: who holds its licenses.)
-    if (!names.has(id)) names.set(id, ((await first<Row>(db, "SELECT COALESCE(NULLIF(y.name, ''), (SELECT x.licensee FROM site_transmitters x JOIN sites s ON s.id = x.site_id WHERE s.system_id = y.id AND x.licensee != '' LIMIT 1), '') AS name FROM systems y WHERE y.id = ?", [id]))?.name as string) ?? "");
+    if (!names.has(id)) names.set(id, ((await first<Row>(db, "SELECT COALESCE(NULLIF(name, ''), licensee) AS name FROM systems WHERE id = ?", [id]))?.name as string) ?? "");
     return names.get(id)!;
   };
   const hits: SearchHit[] = [];

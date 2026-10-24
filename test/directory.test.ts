@@ -204,6 +204,20 @@ test("search by frequency, call sign, identity and words; a system exports as TR
   assert.equal(cfg.talkgroupsCsv, "Decimal,Hex,Alpha Tag,Mode,Description,Tag,Category,Priority\n716,2cc,Engine 16 Tac,D,,Fire Dispatch,,\n");
   const csv = await d.get(`/systems/${id}/talkgroups.csv`);
   assert.match(csv.json, /^Decimal,Hex/);
+  // A bundle for Trunk Recorder Pro (trp-system v1): where it came from, and, asked for as a download, a file name.
+  assert.equal(cfg.format, "trp-system");
+  assert.equal(cfg.v, 1);
+  assert.deepEqual(cfg.source, { directory: "http://x/directory", id, rev: a.json.rev, url: `http://x/directory/systems/${id}` });
+  const dl = await d.get(`/systems/${id}/config?download=1`);
+  assert.match(dl.headers.get("content-disposition") ?? "", /attachment; filename="dc-fire-and-ems\.trp-system\.json"/);
+});
+
+test("the bundle has named talkgroups only: a recorder hears the rest itself", async () => {
+  const d = directory();
+  const a = await d.share(obs(recorder(), [p25Site(1, 1, 857_987_500)], { talkgroups: [tg(716, "Engine 16 Tac")], heardTalkgroups: [{ number: 801, grants: 5, sites: [0], encrypted: false }] }));
+  const cfg = (await d.get(`/systems/${a.json.system}/config`)).json;
+  assert.match(cfg.talkgroupsCsv, /^716,/m);
+  assert.doesNotMatch(cfg.talkgroupsCsv, /^801,/m);
 });
 
 test("a share is checked: a broken one is refused; stewards' actions need the token", async () => {

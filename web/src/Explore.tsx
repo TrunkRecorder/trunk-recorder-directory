@@ -102,11 +102,11 @@ export function ExplorePage(props: { query: URLSearchParams }) {
   const inView = useMemo(() => {
     if (!sites || !bounds) return [];
     const [w, s, e, n] = bounds;
-    const by = new Map<string, { system: string; name: string; type: string; stale: boolean; towers: number }>();
+    const by = new Map<string, { system: string; name: string; licensee: string; type: string; stale: boolean; towers: number }>();
     for (const x of sites) {
       const towers = x.at.filter(([lat, lon]) => lat >= s && lat <= n && lon >= w && lon <= e).length;
       if (!towers) continue;
-      const v = by.get(x.system) ?? { system: x.system, name: x.name, type: x.type, stale: x.stale, towers: 0 };
+      const v = by.get(x.system) ?? { system: x.system, name: x.name, licensee: x.licensee, type: x.type, stale: x.stale, towers: 0 };
       v.towers += towers;
       by.set(x.system, v);
     }
@@ -219,7 +219,7 @@ export function ExplorePage(props: { query: URLSearchParams }) {
           <div className="card focus">
             <div className="row">
               <Link to={`/systems/${selected}`} className="card-title">
-                {selSystem[0]?.name ? titleCase(selSystem[0].name) : "Unnamed system"}
+                {selSystem[0] ? nameOf(selSystem[0]) : "Unnamed system"}
               </Link>
               {selSystem[0] && <TypeBadge type={selSystem[0].type} />}
               <span className="spacer" />
@@ -317,7 +317,7 @@ export function ExplorePage(props: { query: URLSearchParams }) {
                 <li key={s.system} className={`card compact${focus === s.system ? " focus" : ""}`} onMouseEnter={() => setHover(s.system)} onMouseLeave={() => setHover(null)}>
                   <div className="row">
                     <Link to={`/systems/${s.system}`} className="card-title">
-                      {s.name ? titleCase(s.name) : "Unnamed system"}
+                      {nameOf(s)}
                     </Link>
                     <TypeBadge type={s.type} />
                   </div>

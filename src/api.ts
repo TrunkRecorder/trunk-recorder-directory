@@ -114,8 +114,18 @@ export async function handle(env: Env, req: Request): Promise<Response> {
         const s = await getSystem(db, id);
         if (!s || s.status === "hidden") return err(404, "no such system");
         const sites = q.get("sites")?.split(",").filter(Boolean);
+        // Named talkgroups only (a recorder hears the rest itself, soon enough).
         const tgs = (await getTalkgroups(db, id, { sites }))!.filter((t) => t.alpha || q.get("all") === "1");
-        return json({ system: trpSystem(s, sites), talkgroupsCsv: talkgroupsCsv(tgs) }, 200, { etag: `"${s.id}.${s.rev}"` });
+        // A system for Trunk Recorder Pro (format trp-system, v1): its config, its talkgroup file, and where it came from.
+        const licensee = (await first<{ licensee: string }>(db, "SELECT licensee FROM systems WHERE id = ?", [id]))?.licensee ?? "";
+        const bundle = {
+          format: "trp-system", v: 1,
+          source: { directory: `${url.origin}/directory`, id: s.id, rev: s.rev, url: `${url.origin}/directory/systems/${s.id}`, ...(licensee ? { licensee } : {}) },
+          system: trpSystem(s, sites, licensee),
+          talkgroupsCsv: talkgroupsCsv(tgs),
+        };
+        const name = `${(s.name || licensee || s.id).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || s.id}.trp-system.json`;
+        return json(bundle, 200, { etag: `"${s.id}.${s.rev}"`, ...(q.get("download") === "1" ? { "content-disposition": `attachment; filename="${name}"` } : {}) });
       }
       r = m(/^\/systems\/(sys_[0-9a-z]+)\/where$/);
       if (r) return json(await where(db, await resolve(db, r[1])));

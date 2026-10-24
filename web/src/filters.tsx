@@ -1,10 +1,14 @@
 // What every view shares: which kinds of system it shows (types=, in the URL,
 // so a link opens the same view), and putting changes into the URL.
 
+import { TYPES } from "../../src/kinds.ts";
 import { TYPE } from "./api.ts";
+
+export { licensedShown, type LicensedKind } from "../../src/kinds.ts";
 import { TYPE_COLOR } from "./colors.ts";
 
-export const ALL_TYPES = Object.keys(TYPE);
+/** Every kind of system, in the server's order (src/kinds.ts). */
+export const ALL_TYPES: string[] = [...TYPES];
 
 /** The types a URL asks for: all, when it names none. */
 export function typesOf(query: URLSearchParams): string[] {
@@ -61,12 +65,5 @@ export function TypeBadge(props: { type: string }) {
   );
 }
 
-/** What a licensed (not shared) system likely is, by its licence's emissions: the scripts' licensedKind. */
-export type LicensedKind = "p25" | "dmr" | "nxdn" | "analog" | "";
+/** How a licensed (not shared) system's likely kind reads. */
 export const KIND_LABEL: Record<string, string> = { p25: "Likely P25", dmr: "Likely DMR", nxdn: "Likely NXDN", analog: "Analog FM", "": "Type unknown" };
-
-/** Whether the type filter shows a licensed system of this kind (analog under SmartNet or EDACS; unknown only with every type). As src/explore.ts licensedShown. */
-export function licensedShown(kind: LicensedKind, types: string[]): boolean {
-  if (kind === "analog") return types.includes("smartnet") || types.includes("edacs");
-  return kind ? types.includes(kind) : types.length === ALL_TYPES.length;
-}

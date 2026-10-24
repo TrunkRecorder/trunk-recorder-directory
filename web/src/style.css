@@ -159,3 +159,4 @@ fieldset { border: 0; margin: 0; padding: 0; }
 .kind-badge[data-kind="nxdn"]::before { border-color: #8e5bd6; }
 .card.licensed { border-style: dashed; cursor: pointer; }
 .card.licensed .card-title { color: var(--ink); font-weight: 500; }
+.btn.disabled { opacity: 0.5; pointer-events: none; }
