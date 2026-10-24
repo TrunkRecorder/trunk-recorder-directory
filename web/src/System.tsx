@@ -327,6 +327,9 @@ function History(props: { sys: SystemView }) {
 }
 
 /** Adding it to TRP: the browser version on this site imports it; the desktop app fetches it from the link. */
+/** Trunk Recorder Pro for the web (the landing site's /app). */
+const WEB_APP = "https://trunkrecorder.pro/app";
+
 function AddDialog(props: { sys: SystemView; onClose: () => void }) {
   const heard = props.sys.sites.filter((s) => s.status === "heard");
   const [sites, setSites] = useState<string[]>(heard.map((s) => s.id));
@@ -338,18 +341,22 @@ function AddDialog(props: { sys: SystemView; onClose: () => void }) {
     }
   });
   const q = sites.length && sites.length < props.sys.sites.length ? `?sites=${sites.join(",")}` : "";
-  const open = () => {
+  // The bundle (trp-system: its config, named talkgroups, where it came from): what Trunk Recorder Pro imports.
+  const bundle = `${location.origin}${API}/systems/${props.sys.id}/config${q}`;
+  const link = (app: string) => `${app.replace(/\/+$/, "")}/#import=${encodeURIComponent(bundle)}`;
+  const openDesktop = () => {
     try {
       localStorage.setItem("trp.directory.desktop", desktop);
     } catch {
       /* remembered next time, if storage works */
     }
-    window.open(`${desktop.replace(/\/+$/, "")}/#import=${props.sys.id}${q ? `&sites=${sites.join(",")}` : ""}`, "_blank");
+    window.open(link(desktop), "_blank");
   };
   return (
     <div className="modal-back" role="dialog" aria-modal="true" aria-label="Add to Trunk Recorder Pro" onClick={props.onClose} onKeyDown={(e) => e.key === "Escape" && props.onClose()} tabIndex={-1}>
       <div className="modal stack" onClick={(e) => e.stopPropagation()}>
         <h3>Add {props.sys.name || "this system"} to Trunk Recorder Pro</h3>
+        <p className="muted small">Its sites, channels, licenses and named talkgroups. Trunk Recorder Pro shows what it will add first, and updates the system if you already have it.</p>
         {props.sys.sites.length > 1 && (
           <fieldset className="stack">
             <legend className="small muted">The sites you can receive (its talkgroups heard there come with them)</legend>
@@ -362,25 +369,35 @@ function AddDialog(props: { sys: SystemView; onClose: () => void }) {
           </fieldset>
         )}
         <div className="stack">
+          <b>In your browser</b>
+          <div className="row">
+            <a className={`btn primary${sites.length ? "" : " disabled"}`} href={sites.length ? link(WEB_APP) : undefined} target="_blank" rel="noreferrer">
+              Open in Trunk Recorder Pro for the web
+            </a>
+          </div>
+          <span className="muted small">Records with an RTL-SDR plugged into this computer (Chrome or Edge).</span>
+        </div>
+        <div className="stack">
           <b>Desktop app</b>
           <div className="row">
             <input value={desktop} onChange={(e) => setDesktop(e.target.value)} aria-label="Your Trunk Recorder Pro's address" />
-            <button className="btn primary" onClick={open} disabled={!sites.length}>
+            <button className="btn" onClick={openDesktop} disabled={!sites.length}>
               Open in Trunk Recorder Pro
             </button>
           </div>
-          <span className="muted small">It shows what it will add before adding it.</span>
+          <span className="muted small">Its address, as you open it in your browser.</span>
         </div>
         <div className="stack">
-          <b>Or download</b>
+          <b>Or download it</b>
           <div className="row">
-            <a className="btn" href={`${API}/systems/${props.sys.id}/config${q}`} download={`${props.sys.id}.json`}>
-              System (TRP config JSON)
+            <a className="btn" href={`${bundle}${q ? "&" : "?"}download=1`} download>
+              Download for Trunk Recorder Pro
             </a>
-            <a className="btn" href={`${API}/systems/${props.sys.id}/talkgroups.csv${q}`} download={`${props.sys.id}-talkgroups.csv`}>
-              Talkgroups (CSV)
+            <a className="btn ghost" href={`${API}/systems/${props.sys.id}/talkgroups.csv${q}`} download={`${props.sys.id}-talkgroups.csv`}>
+              Talkgroups only (CSV)
             </a>
           </div>
+          <span className="muted small">In Trunk Recorder Pro: Setup → Systems → Import… and choose the file.</span>
         </div>
         <div className="row">
           <span className="spacer" />
