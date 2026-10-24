@@ -258,10 +258,11 @@ export function talkgroupsCsv(tgs: TalkgroupView[]): string {
   return rows.join("\n") + "\n";
 }
 
-/** A system as TRP's config has one (with its directory link), ready to add. */
-export function trpSystem(s: SystemView, sites?: string[]): Record<string, unknown> {
+/** A system as TRP's config has one (with its directory link), ready to add. `licensee`: who holds most of its licenses (an unnamed system's short name). */
+export function trpSystem(s: SystemView, sites?: string[], licensee = ""): Record<string, unknown> {
   const pick = sites?.length ? s.sites.filter((x) => sites.includes(x.id)) : s.sites.filter((x) => x.status !== "retired");
-  const slug = (s.name || s.id).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24) || "system";
+  // Its short name: from its name, else who holds its licenses ("district-of-columbia"), else its ID.
+  const slug = (s.name || licensee || s.id).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24).replace(/-+$/, "") || "system";
   return {
     shortName: slug,
     ...(s.name ? { name: s.name } : {}),

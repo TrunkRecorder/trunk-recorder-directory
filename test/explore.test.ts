@@ -156,3 +156,11 @@ test("the licensed layer's spots know their kind: DC Fire and EMS's are P25, WMA
   assert.deepEqual(kinds("WPXT459"), ["p25"]);
   assert.deepEqual(kinds("WPVX365"), ["analog"]);
 });
+
+test("an unnamed system's bundle: named by who holds its licenses", async () => {
+  const { d, wmata } = await twoSystems();
+  const b = (await d.get(`/systems/${wmata}/config`)).json;
+  assert.match(b.source.licensee, /Metropolitan Area Transit/i);
+  assert.equal(b.system.shortName, "washington-metropolitan");
+  assert.equal(b.system.name, undefined);
+});
