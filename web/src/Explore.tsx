@@ -230,6 +230,10 @@ export function ExplorePage(props: { query: URLSearchParams }) {
             <div className="muted small">
               {selTowers} tower{selTowers === 1 ? "" : "s"}, ringed on the map · {selSystem.length} site{selSystem.length === 1 ? "" : "s"}
             </div>
+            <div className="row small">
+              <Link to={`/systems/${selected}`}>Sites and talkgroups</Link>
+              <Link to={`/systems/${selected}/sdrs`}>SDRs needed: a band plan</Link>
+            </div>
           </div>
         )}
         {picked?.kind === "licensed" && (

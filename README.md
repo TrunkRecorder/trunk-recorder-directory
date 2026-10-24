@@ -24,6 +24,9 @@ add a system to Trunk Recorder Pro from it.
   Census boundaries put each one in a state, county and city, so the directory can be browsed by place, and the map
   (the home page) answers "what's here?" and, with your location (yours, a city, a ZIP code), "what can I hear from
   here?" (with a rough reception estimate from each transmitter's power and height).
+- **The SDRs a system takes:** a system's **SDRs needed** tab plans how many RTL-SDRs, Airspys, HackRFs or Ettus
+  USRPs it takes to record the sites you choose, and where to tune each. It draws a band plan of each device over the
+  channels it holds, by Trunk Recorder Pro's rules (`src/sdrplan.ts`).
 - **Partial views add up:**
   - a share is matched site first, so recorders hearing different sites of a statewide system build one system;
   - two records found to be one system (by their identity, or by one announcing the other's site) are merged, and
