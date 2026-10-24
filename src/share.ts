@@ -39,7 +39,7 @@ export async function resolve(db: Db, id: string): Promise<string> {
 }
 
 /** The records claims point at, best first (strong claims, then most observed). */
-async function lookupClaims(cs: ChangeSet, claims: ClaimKeys[], kind: string): Promise<{ id: string; strong: boolean }[]> {
+export async function lookupClaims(cs: ChangeSet, claims: ClaimKeys[], kind: string): Promise<{ id: string; strong: boolean }[]> {
   const keys = claims.flatMap((c) => c.lookup);
   if (!keys.length) return [];
   const strongKeys = new Set(claims.filter((c) => c.strong).flatMap((c) => c.lookup));

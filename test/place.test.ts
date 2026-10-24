@@ -3,7 +3,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { choose } from "../src/place.ts";
+import { cellToLatLng, gridDisk, latLngToCell } from "h3-js";
+import { choose, sameIdentityNearby } from "../src/place.ts";
 import { directory, fixturePlaces, obs, p25Site, recorder } from "./helpers.ts";
 
 /** DC Fire and EMS's site 1.3, as TRP shares it: its control channels, a voice channel, a call sign heard on the air. */
@@ -160,4 +161,39 @@ test("placing again (admin) joins a record to its twin on the same towers", asyn
   assert.deepEqual(r.json.merged, [b.json.system]);
   assert.equal((await d.db.all<any>("SELECT id FROM systems WHERE status = 'active'")).length, 1);
   assert.equal((await d.get(`/systems/${b.json.system}`)).status, 301);
+});
+
+test("a statewide system shared from two ends: the same weak identity, its towers in regions side by side, is one system", async () => {
+  const d = directory({ place: true });
+  const bee = (s: ReturnType<typeof dcfd>, rfss: number, site: number) => {
+    s.heard!.identity = { ...s.heard!.identity!, wacn: 0xbee00, sysId: 0x6bd, rfss, site };
+    s.expect = { wacn: 0xbee00, sysId: 0x6bd, rfss, site };
+    s.heard!.callSigns = [];
+    return s;
+  };
+  // A, at DC Fire and EMS's towers; its identity claimed where a recorder once was (claims from before towers).
+  const a = (await d.share(obs(recorder(), [bee(dcfd(), 1, 3)]))).json.system;
+  d.db.raw.exec("DELETE FROM claims WHERE key LIKE '%@%'");
+  // B: the same identity, another end of the system, on a tower in the region beside DC's; and C, far away.
+  const other = async (rfss: number, site: number, cc: number, at: [number, number], callSign: string) => {
+    const s = bee(p25Site(rfss, site, cc), rfss, site);
+    const id = (await d.share(obs(recorder(), [s]))).json.system;
+    const siteId = (await d.get(`/systems/${id}`)).json.sites[0].id;
+    d.db.raw.prepare("INSERT INTO site_transmitters (site_id, call_sign, licensee, lat, lon, height_m, erp_w, freq_hz, station_class, state, county, place, at) VALUES (?, ?, 'STATE', ?, ?, 30, 100, ?, 'FB2', 'MD', '', '', 0)").run(siteId, callSign, at[0], at[1], cc);
+    return id;
+  };
+  const dc = latLngToCell(38.91, -77.02, 3);
+  const beside = cellToLatLng(gridDisk(dc, 1).find((c) => c !== dc)!) as [number, number];
+  const b = await other(2, 20, 851_000_000, beside, "WTST001");
+  const c = await other(3, 30, 852_000_000, [39.74, -104.99], "WTST002");
+  assert.equal(new Set([a, b, c]).size, 3, "three records, as shared");
+  assert.deepEqual(await sameIdentityNearby(d.db, b, 1), []);
+  assert.deepEqual(await sameIdentityNearby(d.db, c, 1), [], "far away: another system with a common identity");
+  // Placing A again claims its identity at its towers: B, beside them, is it.
+  const r = await d.post(`/systems/${a}/place`, {});
+  assert.deepEqual(r.json.merged, [b]);
+  assert.equal(r.json.systemId, a);
+  const h = (await d.get(`/systems/${a}/history`)).json.history;
+  assert.ok(h.some((e: any) => /identity, where its licensed towers are/.test(e.note ?? "")), JSON.stringify(h.map((e: any) => e.note)));
+  assert.equal((await d.get(`/systems/${c}`)).json.status, "active");
 });
