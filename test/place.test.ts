@@ -4,7 +4,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { cellToLatLng, gridDisk, latLngToCell } from "h3-js";
-import { choose, sameIdentityNearby } from "../src/place.ts";
+import { choose } from "../src/place.ts";
+import { licenseeKey, twinsOf } from "../src/twins.ts";
 import { directory, fixturePlaces, obs, p25Site, recorder } from "./helpers.ts";
 
 /** DC Fire and EMS's site 1.3, as TRP shares it: its control channels, a voice channel, a call sign heard on the air. */
@@ -153,7 +154,7 @@ test("placing again (admin) joins a record to its twin on the same towers", asyn
   const d = directory({ place: true });
   const a = await d.share(obs(recorder(), [dcfd()]));
   // As a record from before claims and placing.
-  d.db.raw.exec("DELETE FROM claims; DELETE FROM site_transmitters; DELETE FROM placements; UPDATE systems SET licensee = ''");
+  d.db.raw.exec("DELETE FROM claims; DELETE FROM site_transmitters; DELETE FROM placements; DELETE FROM system_licensees; UPDATE systems SET licensee = ''");
   const b = await d.share(obs(recorder(), [dcfd()]));
   assert.notEqual(b.json.system, a.json.system);
   const r = await d.post(`/systems/${a.json.system}/place`, {});
@@ -188,8 +189,8 @@ test("a statewide system shared from two ends: the same weak identity, its tower
   const b = await other(2, 20, 851_000_000, beside, "WTST001", "STATE OF MARYLAND");
   const c = await other(3, 30, 852_000_000, [39.74, -104.99], "WTST002", "CITY OF DENVER");
   assert.equal(new Set([a, b, c]).size, 3, "three records, as shared");
-  assert.deepEqual(await sameIdentityNearby(d.db, b, 1), []);
-  assert.deepEqual(await sameIdentityNearby(d.db, c, 1), [], "far away: another system with a common identity");
+  assert.deepEqual((await twinsOf(d.db, b, 1)).map((t) => t.id), []);
+  assert.deepEqual((await twinsOf(d.db, c, 1)).map((t) => t.id), [], "far away: another system with a common identity");
   // Placing A again claims its identity at its towers: B, beside them, is it.
   const r = await d.post(`/systems/${a}/place`, {});
   assert.deepEqual(r.json.merged, [b]);
@@ -199,6 +200,36 @@ test("a statewide system shared from two ends: the same weak identity, its tower
   assert.equal((await d.get(`/systems/${c}`)).json.status, "active");
   // Regions apart, but under the same licensee (as State of Indiana - IPSC's two ends): one system.
   const e = await other(4, 40, 853_000_000, [47.61, -122.33], "WTST003", "District of Columbia");
-  assert.deepEqual(await sameIdentityNearby(d.db, e, 1), [a]);
-  assert.deepEqual(await sameIdentityNearby(d.db, c, 1), [], "another licensee far away is still another system");
+  assert.deepEqual((await twinsOf(d.db, e, 1)).map((t) => t.id), [a]);
+  assert.deepEqual((await twinsOf(d.db, c, 1)).map((t) => t.id), [], "another licensee far away is still another system");
+});
+
+test("a licensee's name compares however it's written", () => {
+  assert.equal(licenseeKey("MADISON, COUNTY OF"), licenseeKey("Madison County"));
+  assert.equal(licenseeKey("Madison Co."), licenseeKey("Madison County"));
+  assert.equal(licenseeKey("STATE OF INDIANA - IPSC"), licenseeKey("State of Indiana - IPSC"));
+  assert.notEqual(licenseeKey("State of Indiana - IPSC"), licenseeKey("State of Indiana - OEC"));
+  assert.equal(licenseeKey("Fire Dept"), licenseeKey("fire department"));
+});
+
+test("the same FCC licensee: no identity to tell them apart and towers near, one system; far, or another licensee, not", async () => {
+  const d = directory({ place: true });
+  // DMR (no identity on the air), each on a tower the test says, under the licensee it says.
+  const dmr = async (cc: number, at: [number, number], licensee: string) => {
+    const site = { controlChannelsHz: [cc], heard: { controlChannelHz: cc, voice: [], neighbours: [], callSigns: [], good: 100, bad: 1 } };
+    const id = (await d.share(obs(recorder(), [site], { system: { type: "dmr", name: "", sites: [site] } }))).json.system;
+    const siteId = (await d.get(`/systems/${id}`)).json.sites[0].id;
+    d.db.raw.prepare("INSERT INTO site_transmitters (site_id, call_sign, licensee, lat, lon, height_m, erp_w, freq_hz, station_class, state, county, place, at) VALUES (?, 'WTST009', ?, ?, ?, 30, 100, ?, 'FB2', 'VA', '', '', 0)").run(siteId, licensee, at[0], at[1], cc);
+    return id;
+  };
+  const a = await dmr(463_375_000, [38.90, -77.03], "COUNTY OF FAIRFAX");
+  const near = await dmr(464_350_000, [38.85, -77.30], "Fairfax County");
+  const far = await dmr(463_750_000, [35.20, -80.84], "Fairfax County");
+  const other = await dmr(452_175_000, [38.88, -77.10], "Arlington County");
+  for (const id of [a, far, other]) await twinsOf(d.db, id, 1);
+  const t = await twinsOf(d.db, near, 1);
+  assert.deepEqual(t.map((x) => x.id), [a]);
+  assert.match(t[0].why, /same FCC licensee's towers, within 50 km/);
+  assert.deepEqual((await twinsOf(d.db, far, 1)).map((x) => x.id), [], "400 km away: another of its systems");
+  assert.deepEqual((await twinsOf(d.db, other, 1)).map((x) => x.id), [], "another licensee, near");
 });
