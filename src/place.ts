@@ -278,13 +278,15 @@ export async function sameTowers(db: Db, systemId: string): Promise<string[]> {
 
 /**
  * Other systems with system `systemId`'s identity where its licensed towers
- * are: a weak identity (a default WACN, a SmartNet SysID) is claimed in each
- * region its towers are in, and another active system of its type holding it
- * in one of them or one around is the same system, shared from another part
- * of it (a statewide system whose recorders hear different ends of it).
+ * are, or under its licensee: a weak identity (a default WACN, a SmartNet
+ * SysID) is claimed in each region its towers are in, and another active
+ * system of its type holding it in one of them or one around, or anywhere
+ * with the same FCC licensee, is the same system, shared from another part of
+ * it (a statewide system whose recorders hear different ends of it: State of
+ * Indiana - IPSC's are regions apart, under different call signs).
  */
 export async function sameIdentityNearby(db: Db, systemId: string, now: number): Promise<string[]> {
-  const sys = (await db.all<Row>("SELECT type, wacn, sys_id FROM systems WHERE id = ?", [systemId]))[0];
+  const sys = (await db.all<Row>("SELECT type, wacn, sys_id, licensee FROM systems WHERE id = ?", [systemId]))[0];
   if (!sys) return [];
   const tx = await db.all<{ lat: number; lon: number }>("SELECT DISTINCT x.lat, x.lon FROM site_transmitters x JOIN sites s ON s.id = x.site_id WHERE s.system_id = ?", [systemId]);
   const id = { wacn: (sys.wacn as number | null) ?? undefined, sysId: (sys.sys_id as number | null) ?? undefined };
@@ -301,5 +303,12 @@ export async function sameIdentityNearby(db: Db, systemId: string, now: number):
     if (other?.status === "active" && other.type === sys.type) out.push(h.id);
   }
   await cs.commit();
+  if (sys.licensee && sys.sys_id != null) {
+    const same = await db.all<{ id: string }>(
+      `SELECT id FROM systems WHERE id != ? AND status = 'active' AND type = ? AND sys_id = ? AND wacn IS ? AND licensee != '' AND LOWER(licensee) = LOWER(?)`,
+      [systemId, sys.type, sys.sys_id, sys.wacn ?? null, sys.licensee],
+    );
+    for (const r of same) if (!out.includes(r.id)) out.push(r.id);
+  }
   return out;
 }
