@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type Channel, counts, DEVICES, planSdrs, usableHalfWidth } from "../src/sdrplan.ts";
+import { type Channel, counts, DEVICES, optimize, planSdrs, ratesOf, usableHalfWidth } from "../src/sdrplan.ts";
 
 const dev = (k: string) => DEVICES.find((d) => d.key === k)!;
 const ch = (mhz: number[], kind: Channel["kind"] = "voice"): Channel[] => mhz.map((m) => ({ hz: Math.round(m * 1e6), kind }));
@@ -68,4 +68,38 @@ test("2.5 MHz of channels is more than an RTL-SDR at 2.4 MS/s holds (2.23 MHz us
   const site = ch([855.4625, 857.9875], "control");
   assert.equal(planSdrs(site, dev("rtlsdr")).windows.length, 2);
   assert.equal(planSdrs(site, dev("rtlsdr"), 3_200_000).windows.length, 1);
+});
+
+const wmata = [...ch([490.7875, 490.8625, 496.4375, 496.5375], "control"), ...ch([490.7625, 490.8375, 490.8875, 490.9125, 496.4625, 496.5875, 496.6125])];
+
+test("optimized: the fewest devices, each at the lowest rate of its class that holds its channels", () => {
+  // Two clusters 6 MHz apart: two RTL-SDRs, each needing only a little of its band.
+  const rtl = optimize(wmata, dev("rtlsdr"));
+  assert.equal(rtl.windows.length, 2);
+  holds(rtl, wmata);
+  assert.ok(rtl.windows.every((w) => w.rateHz === 1_024_000), rtl.windows.map((w) => w.rateHz).join());
+  // One Airspy R2 must span both: its 10 MS/s, not 2.5.
+  const airspy = optimize(wmata, dev("airspy"));
+  assert.equal(airspy.windows.length, 1);
+  assert.equal(airspy.windows[0].rateHz, 10_000_000);
+  // A HackRF needs about 6 MHz: 8 MS/s, the lowest of its rates that holds it.
+  const hack = optimize(wmata, dev("hackrf"));
+  assert.equal(hack.windows.length, 1);
+  assert.equal(hack.windows[0].rateHz, 8_000_000);
+  holds(hack, wmata);
+});
+
+test("optimized never takes more devices than any one rate of its class; faster, less reliable rates only when asked", () => {
+  const site = ch([855.4625, 857.9875], "control");
+  assert.equal(optimize(site, dev("rtlsdr")).windows.length, 2, "2.5 MHz: two at 2.4 MS/s or less");
+  const pushed = optimize(site, dev("rtlsdr"), { stretch: true });
+  assert.equal(pushed.windows.length, 1);
+  assert.equal(pushed.windows[0].rateHz, 2_880_000, "the lowest of the faster rates that holds it");
+  const sys = [...ch([851.0125, 853.4125, 856.2375, 859.9875], "control"), ...ch(Array.from({ length: 30 }, (_, i) => 851.1 + i * 0.3))];
+  for (const d of DEVICES) {
+    const best = optimize(sys, d).windows.length;
+    for (const r of ratesOf(d)) assert.ok(best <= planSdrs(sys, d, r).windows.length, `${d.key} at ${r}`);
+    holds(optimize(sys, d), sys);
+  }
+  assert.deepEqual(counts(wmata).map((c) => [c.device.key, c.count]), [["rtlsdr", 2], ["airspy", 1], ["airspy-mini", 2], ["hackrf", 1], ["usrp", 1]]);
 });

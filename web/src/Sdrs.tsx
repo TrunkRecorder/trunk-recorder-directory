@@ -1,10 +1,12 @@
 // How many SDRs a system takes, and where each is tuned (src/sdrplan.ts, by
 // Trunk Recorder Pro's rules): for the device and rate chosen, and the sites
-// chosen (a recorder follows one site; a simulcast site is one), a band plan
+// chosen (a recorder follows one site; a simulcast site is one), optimized
+// (the fewest devices, each at the lowest rate that holds its channels) or at
+// one rate, a band plan
 // of each device's span over the channels it holds, and a table of each.
 
 import { useMemo, useState } from "react";
-import { counts, DEVICES, planSdrs, type Channel, type Window } from "../../src/sdrplan.ts";
+import { counts, DEVICES, optimize, planSdrs, ratesOf, type Channel, type Window } from "../../src/sdrplan.ts";
 import { mhz, type SystemView } from "./api.ts";
 
 /** Each device's colour, by its place in the plan. */
@@ -22,8 +24,11 @@ export function SdrPlanner(props: { sys: SystemView }) {
   const [sites, setSites] = useState<string[]>(() => choosable.slice(0, 1).map((s) => s.id));
   const [deviceKey, setDeviceKey] = useState("rtlsdr");
   const device = DEVICES.find((d) => d.key === deviceKey) ?? DEVICES[0];
-  const [rateHz, setRateHz] = useState(device.rates[0]);
-  const rate = device.rates.includes(rateHz) ? rateHz : device.rates[0];
+  // 0: optimized (the fewest devices, each at the lowest rate that holds its channels); else one rate for all.
+  const [rateHz, setRateHz] = useState(0);
+  const [stretch, setStretch] = useState(false);
+  const offered = ratesOf(device, stretch);
+  const rate = offered.includes(rateHz) ? rateHz : 0;
 
   const channels = useMemo<Channel[]>(
     () =>
@@ -32,8 +37,9 @@ export function SdrPlanner(props: { sys: SystemView }) {
         .flatMap((s) => [...s.controlChannelsHz.map((hz) => ({ hz, kind: "control" as const })), ...s.voiceChannelsHz.map((hz) => ({ hz, kind: "voice" as const }))]),
     [props.sys, sites],
   );
-  const plan = useMemo(() => planSdrs(channels, device, rate), [channels, device, rate]);
-  const others = useMemo(() => counts(channels), [channels]);
+  const plan = useMemo(() => (rate ? planSdrs(channels, device, rate) : optimize(channels, device, { stretch })), [channels, device, rate, stretch]);
+  const others = useMemo(() => counts(channels, stretch), [channels, stretch]);
+  const used = [...new Set(plan.windows.map((w) => w.rateHz))].sort((a, b) => a - b);
   const voice = new Set(channels.filter((c) => c.kind === "voice").map((c) => c.hz)).size;
 
   if (!choosable.length) return <p className="muted">No control channels known yet, so there's nothing to plan.</p>;
@@ -57,13 +63,19 @@ export function SdrPlanner(props: { sys: SystemView }) {
           <label className="small">
             Sample rate{" "}
             <select value={rate} onChange={(e) => setRateHz(Number(e.target.value))}>
-              {device.rates.map((r) => (
+              <option value={0}>Optimized: fewest devices, each as slow as it can be</option>
+              {offered.map((r) => (
                 <option key={r} value={r}>
-                  {msps(r)}
+                  {msps(r)} for every one{device.stretch.includes(r) ? " (a faster rate)" : ""}
                 </option>
               ))}
             </select>
           </label>
+          {device.stretch.length > 0 && (
+            <label className="toggle small">
+              <input type="checkbox" checked={stretch} onChange={(e) => setStretch(e.target.checked)} /> Also its faster rates ({device.stretch.map(msps).join(", ")})
+            </label>
+          )}
           <span className="muted small">{device.note}</span>
         </div>
         {choosable.length > 1 && (
@@ -90,7 +102,8 @@ export function SdrPlanner(props: { sys: SystemView }) {
               {plan.windows.length} × {device.name}
             </b>
             <span className="muted">
-              at {msps(rate)} for {new Set(channels.filter((c) => c.kind === "control").map((c) => c.hz)).size} control and {voice} voice channel{voice === 1 ? "" : "s"}
+              at {used.map(msps).join(" and ")}
+              {!rate && used.length > 0 && ` (the lowest that holds ${plan.windows.length === 1 ? "its" : "each one's"} channels)`} for {new Set(channels.filter((c) => c.kind === "control").map((c) => c.hz)).size} control and {voice} voice channel{voice === 1 ? "" : "s"}
               {voice === 0 && " (no voice channels heard yet: the plan covers the control channels)"}
             </span>
           </div>
@@ -106,7 +119,7 @@ export function SdrPlanner(props: { sys: SystemView }) {
                 <tr>
                   <th>SDR</th>
                   <th>Centre, MHz</th>
-                  <th>Sample rate</th>
+                  <th>Sample rate (bandwidth)</th>
                   <th>Records, MHz</th>
                   <th>Channels</th>
                 </tr>
@@ -121,7 +134,10 @@ export function SdrPlanner(props: { sys: SystemView }) {
                       {mhz(w.centerHz)}
                       {w.nearDc && <span className="tag" title="A channel is within 25 kHz of the centre, where the device's DC spike is; no centre clears them all">near DC</span>}
                     </td>
-                    <td>{msps(w.rateHz)}</td>
+                    <td>
+                      {msps(w.rateHz)}
+                      {device.stretch.includes(w.rateHz) && <span className="tag" title={device.note}>faster rate</span>}
+                    </td>
                     <td className="mono small">
                       {mhz(w.lowHz)} – {mhz(w.highHz)}
                     </td>
@@ -133,7 +149,10 @@ export function SdrPlanner(props: { sys: SystemView }) {
               </tbody>
             </table>
           </div>
-          <p className="muted small">* a control channel. In Trunk Recorder Pro, add a source for each and set its centre and rate as above (Setup → Radios).</p>
+          <p className="muted small">
+            * a control channel. In Trunk Recorder Pro, add a source for each and set its centre and sample rate as above (Setup → Radios).
+            {!rate && " Optimized: planned at the fastest rate its class runs at (no rate takes fewer devices), then each slowed to the lowest that still holds its channels, for less CPU and USB."}
+          </p>
         </>
       )}
     </div>

@@ -18,8 +18,12 @@ const DC_TRIES = 40;
 export interface Device {
   key: string;
   name: string;
-  /** Sample rates it runs at (S/s), the usual first. */
+  /** Sample rates it runs at reliably (S/s), lowest first. */
   rates: number[];
+  /** Faster ones it can run at, less reliably (an RTL-SDR above 2.4 MS/s drops samples on many hosts). */
+  stretch: number[];
+  /** The rate to start from when one is chosen by hand. */
+  usual: number;
   /** What it tunes, Hz. */
   minHz: number;
   maxHz: number;
@@ -27,14 +31,17 @@ export interface Device {
   note: string;
 }
 
-/** The devices TRP records with; their rates as TRP's Setup offers them. */
+/** The devices TRP records with, and the rates each class runs at. */
 export const DEVICES: Device[] = [
-  { key: "rtlsdr", name: "RTL-SDR", rates: [2_400_000, 2_048_000, 2_560_000, 3_200_000], minHz: 24e6, maxHz: 1_766e6, note: "2.4 MS/s is the reliable rate; 3.2 can drop samples." },
-  { key: "airspy", name: "Airspy R2", rates: [10_000_000, 2_500_000], minHz: 24e6, maxHz: 1_800e6, note: "10 or 2.5 MS/s." },
-  { key: "airspy-mini", name: "Airspy Mini", rates: [6_000_000, 3_000_000], minHz: 24e6, maxHz: 1_800e6, note: "6 or 3 MS/s (10 with newer firmware)." },
-  { key: "hackrf", name: "HackRF One", rates: [10_000_000, 8_000_000, 16_000_000, 20_000_000], minHz: 1e6, maxHz: 6_000e6, note: "Through SoapySDR. Above 10 MS/s needs a fast USB port and CPU." },
-  { key: "usrp", name: "Ettus USRP (B200/B210)", rates: [20_000_000, 8_000_000, 16_000_000, 32_000_000, 56_000_000], minHz: 70e6, maxHz: 6_000e6, note: "Up to 56 MS/s over USB 3; 20 is a comfortable rate." },
+  { key: "rtlsdr", name: "RTL-SDR", rates: [1_024_000, 1_400_000, 1_800_000, 1_920_000, 2_048_000, 2_400_000], stretch: [2_560_000, 2_880_000, 3_200_000], usual: 2_400_000, minHz: 24e6, maxHz: 1_766e6, note: "Up to 2.4 MS/s reliably; 2.56–3.2 drop samples on many computers." },
+  { key: "airspy", name: "Airspy R2", rates: [2_500_000, 10_000_000], stretch: [], usual: 10_000_000, minHz: 24e6, maxHz: 1_800e6, note: "2.5 or 10 MS/s." },
+  { key: "airspy-mini", name: "Airspy Mini", rates: [3_000_000, 6_000_000], stretch: [10_000_000], usual: 6_000_000, minHz: 24e6, maxHz: 1_800e6, note: "3 or 6 MS/s; 10 with newer firmware." },
+  { key: "hackrf", name: "HackRF One", rates: [2_000_000, 4_000_000, 8_000_000, 10_000_000, 12_500_000, 16_000_000, 20_000_000], stretch: [], usual: 10_000_000, minHz: 1e6, maxHz: 6_000e6, note: "2–20 MS/s, through SoapySDR; above 10 needs a fast USB port and CPU." },
+  { key: "usrp", name: "Ettus USRP (B200/B210)", rates: [2_400_000, 4_000_000, 5_000_000, 6_400_000, 8_000_000, 10_000_000, 12_500_000, 16_000_000, 20_000_000, 32_000_000, 56_000_000], stretch: [], usual: 20_000_000, minHz: 70e6, maxHz: 6_000e6, note: "Up to 56 MS/s over USB 3." },
 ];
+
+/** The rates the optimizer may use: its reliable ones, and its faster ones if `stretch`. */
+export const ratesOf = (d: Device, stretch = false) => [...d.rates, ...(stretch ? d.stretch : [])].sort((a, b) => a - b);
 
 /** Half the band a device at `rateHz` records well, Hz. */
 export const usableHalfWidth = (rateHz: number, guardHz = GUARD_HZ) => Math.max(rateHz / 2 - Math.max(guardHz, 0), rateHz / 4);
@@ -57,6 +64,7 @@ export interface Window {
 
 export interface Plan {
   device: Device;
+  /** The rate it was planned at (optimize: the top; each window says its own). */
   rateHz: number;
   windows: Window[];
   /** Channels it can't tune. */
@@ -77,7 +85,7 @@ function offDc(mid: number, hzs: number[], reach: number): { center: number; nea
 }
 
 /** The fewest windows of `device` at `rateHz` that hold every channel (greedy from the lowest: the fewest there are). */
-export function planSdrs(channels: Channel[], device: Device, rateHz = device.rates[0], guardHz = GUARD_HZ): Plan {
+export function planSdrs(channels: Channel[], device: Device, rateHz = device.usual, guardHz = GUARD_HZ): Plan {
   const byHz = new Map<number, Channel>();
   // A frequency that is both is a control channel.
   for (const c of channels) if (!byHz.has(c.hz) || c.kind === "control") byHz.set(c.hz, c);
@@ -100,7 +108,26 @@ export function planSdrs(channels: Channel[], device: Device, rateHz = device.ra
   return { device, rateHz, windows, outOfRange };
 }
 
-/** How many of each device, at its usual rate: the choice at a glance. */
-export function counts(channels: Channel[]): { device: Device; count: number }[] {
-  return DEVICES.map((d) => ({ device: d, count: planSdrs(channels, d).windows.length }));
+/**
+ * The fewest devices, then each at the lowest rate that holds its channels:
+ * planned at the class's top rate (no rate takes fewer), then each window
+ * slowed to the lowest rate that still holds what it has, off DC (less CPU
+ * and USB, and less to keep up with).
+ */
+export function optimize(channels: Channel[], device: Device, opts: { stretch?: boolean; guardHz?: number } = {}): Plan {
+  const rates = ratesOf(device, opts.stretch);
+  const top = planSdrs(channels, device, rates[rates.length - 1], opts.guardHz);
+  const windows = top.windows.map((w) => {
+    for (const r of rates) {
+      const one = planSdrs(w.channels, device, r, opts.guardHz);
+      if (one.windows.length === 1 && !one.windows[0].nearDc) return one.windows[0];
+    }
+    return w;
+  });
+  return { ...top, windows };
+}
+
+/** How many of each device the optimizer takes: the choice at a glance. */
+export function counts(channels: Channel[], stretch = false): { device: Device; count: number }[] {
+  return DEVICES.map((d) => ({ device: d, count: optimize(channels, d, { stretch }).windows.length }));
 }
