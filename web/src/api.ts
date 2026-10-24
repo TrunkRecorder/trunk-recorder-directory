@@ -22,6 +22,7 @@ export interface SystemView {
   rev: number;
   type: string;
   name: string;
+  licensee: string;
   wacn: number | null;
   sysId: number | null;
   status: string;
@@ -127,10 +128,19 @@ export interface MapSite {
 export const nameOf = (s: { name: string; licensee?: string }) => s.name || (s.licensee ? titleCase(s.licensee) : "Unnamed system");
 
 /** FCC licensees are in capitals: "DISTRICT OF COLUMBIA" → "District of Columbia". */
+/** Short words that are words, not initials ("CITY OF DOVER", "FIRE"): title-cased; any other short word in capitals is kept ("IPSC", "EMS", "DC"). */
+const SHORT_WORDS = new Set(["city", "town", "fire", "park", "lake", "bay", "port", "fort", "new", "east", "west", "north", "south", "area", "mesa", "glen", "hill", "hall", "univ", "dept", "co", "st", "mt", "twp", "rail", "road", "air", "gas", "oil", "post", "farm", "camp", "isle", "key", "keys", "rock", "elk", "oak", "pine", "old", "red", "san", "los", "las", "del", "de", "la", "el", "le", "van", "von", "mc", "mac", "life", "care", "med", "unit", "zone", "base", "home", "bus", "auto"]);
+const SMALL = new Set(["of", "and", "the", "for", "in", "on", "at", "to"]);
+
+/** A licensee's name in capitals, as the FCC keeps most, title-cased; a name with lower case already is left as it is. */
 export function titleCase(s: string): string {
   if (s !== s.toUpperCase()) return s;
-  const small = new Set(["of", "and", "the", "for", "in", "on", "at", "to"]);
-  return s.toLowerCase().replace(/\b([a-z])([a-z']*)/g, (w, a: string, b: string, i: number) => (i > 0 && small.has(w) ? w : a.toUpperCase() + b));
+  return s.replace(/[A-Z][A-Z']*/g, (w: string, i: number) => {
+    const lower = w.toLowerCase();
+    if (i > 0 && SMALL.has(lower)) return lower;
+    if (w.length <= 4 && !SMALL.has(lower) && !SHORT_WORDS.has(lower)) return w;
+    return w[0] + lower.slice(1);
+  });
 }
 
 export function ago(t: number | null): string {
