@@ -148,8 +148,8 @@ function systemView(recs: Records): SystemView | null {
       bandplan: x.bandplan ? JSON.parse(x.bandplan as string) : null,
       lat: x.lat as number | null,
       lon: x.lon as number | null,
-      controlChannelsHz: freqs.filter((f) => f.site_id === x.id && f.use === "control").map((f) => f.freq_hz as number).sort((a, b) => a - b),
-      voiceChannelsHz: freqs.filter((f) => f.site_id === x.id && f.use === "voice").map((f) => f.freq_hz as number).sort((a, b) => a - b),
+      controlChannelsHz: channels(freqs, x.id as string, "control"),
+      voiceChannelsHz: channels(freqs, x.id as string, "voice"),
       neighbours: [...recs.get("neighbour")!.values()].filter((n) => n.site_id === x.id).map((n) => n.neighbour_id as string),
       firstHeard: x.first_heard as number | null,
       lastHeard: x.last_heard as number | null,
@@ -180,6 +180,9 @@ function systemView(recs: Records): SystemView | null {
     talkgroupCount: [...recs.get("talkgroup")!.values()].filter((t) => t.status === "active" || t.status === "heard").length,
   };
 }
+
+/** A site's channels of one use, each once (a site merged into it may have brought the same one), lowest first. */
+const channels = (freqs: Row[], siteId: string, use: string) => [...new Set(freqs.filter((f) => f.site_id === siteId && f.use === use).map((f) => f.freq_hz as number))].sort((a, b) => a - b);
 
 /** A system, as it is or was at version `rev`. Null: no such system. A merged one says what it went into. */
 export async function getSystem(db: Db, id: string, rev?: number): Promise<SystemView | null> {
