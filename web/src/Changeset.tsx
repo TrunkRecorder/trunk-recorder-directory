@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { get, NotFound } from "./api.ts";
+import { Page } from "./Page.tsx";
 
 interface Rev {
   record_kind: string;
@@ -26,13 +27,19 @@ export function ChangesetPage(props: { id: string }) {
     const x = (r.after ?? r.before) as Record<string, unknown>;
     return x?.alpha || x?.name || x?.number || x?.value || x?.call_sign || "";
   };
+  const title = String(c.info.kind)[0].toUpperCase() + String(c.info.kind).slice(1);
   return (
-    <div className="stack">
-      <h1>{String(c.info.kind)[0].toUpperCase() + String(c.info.kind).slice(1)}</h1>
-      <p className="muted">
-        {new Date(c.info.at as number).toLocaleString()} · by {c.info.actor_kind === "recorder" ? "a recorder" : String(c.info.actor_kind)}
-        {c.info.note ? ` · ${c.info.note}` : ""}
-      </p>
+    <Page
+      title={title}
+      label={title}
+      self={`/changesets/${props.id}`}
+      meta={
+        <span>
+          {new Date(c.info.at as number).toLocaleString()} · by {c.info.actor_kind === "recorder" ? "a recorder" : String(c.info.actor_kind)}
+          {c.info.note ? ` · ${c.info.note}` : ""}
+        </span>
+      }
+    >
       <div className="table-wrap">
         <table>
           <thead>
@@ -59,6 +66,6 @@ export function ChangesetPage(props: { id: string }) {
           </tbody>
         </table>
       </div>
-    </div>
+    </Page>
   );
 }

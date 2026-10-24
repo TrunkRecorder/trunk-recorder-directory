@@ -74,3 +74,13 @@ test("a system's site recorded twice, before sites were matched in their system:
   const again = await d.share(smartnet({ ...wmata(), directoryId: twin }, { directory: { id, rev: s.rev } }));
   assert.deepEqual(again.json.sites, [kept]);
 });
+
+test("a site's channels are listed once, though a merge from before brought the same one twice", async () => {
+  const d = directory();
+  const a = await d.share(smartnet(wmata()));
+  const [site] = a.json.sites;
+  d.db.raw.prepare("INSERT INTO site_freqs (id, site_id, freq_hz, use, first_heard, last_heard, grants) SELECT 'fq_dup' || substr(id, 4), site_id, freq_hz, use, first_heard, last_heard, grants FROM site_freqs WHERE site_id = ?").run(site);
+  const s = (await d.get(`/systems/${a.json.system}`)).json.sites[0];
+  assert.deepEqual(s.controlChannelsHz, [490_787_500, 490_862_500, 496_437_500, 496_537_500]);
+  assert.deepEqual(s.voiceChannelsHz, [490_762_500]);
+});

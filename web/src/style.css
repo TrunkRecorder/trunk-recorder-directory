@@ -176,3 +176,17 @@ fieldset { border: 0; margin: 0; padding: 0; }
 .legend-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); vertical-align: middle; }
 .legend-tick { display: inline-block; width: 2px; height: 10px; background: var(--muted); vertical-align: middle; }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: middle; }
+
+/* Every page's frame (Page.tsx): the way back, then the title with its actions on the right, then a line about it. */
+.page > .crumbs { min-height: 1.4em; }
+.page-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
+.page-head h1 { min-width: 0; }
+.page-actions { margin-left: auto; }
+/* Dialogs (Page.tsx Dialog): title and × at the top, buttons at the bottom right, the main one last. */
+.modal:focus { outline: none; }
+.modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.modal-head h3 { margin: 0; }
+.modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--line); margin-top: 4px; padding-top: 12px; }
+.close-x { flex: none; width: 28px; height: 28px; margin: -4px -6px 0 0; border: 0; border-radius: 6px; background: none; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; }
+.close-x:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.close-x:focus-visible { outline: 2px solid var(--accent); }

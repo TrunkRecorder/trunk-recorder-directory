@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ago, get, hex, mhz, nameOf, NotFound, TYPE, API, type HistoryEntry, type SystemView, type TalkgroupView } from "./api.ts";
 import { go, Link } from "./router.tsx";
 import { MapView } from "./MapView.tsx";
+import { Dialog, Page } from "./Page.tsx";
 import { SdrPlanner } from "./Sdrs.tsx";
 
 type Tab = "sites" | "talkgroups" | "licenses" | "sdrs" | "history";
@@ -41,17 +42,20 @@ export function SystemPage(props: { id: string; tab: Tab; query: URLSearchParams
       {label}
     </Link>
   );
+  const title = nameOf(sys);
   return (
-    <div className="stack">
-      <section className="stack">
-        <div className="row">
-          <h1>{nameOf(sys)}</h1>
-          <span className="spacer" />
-          <button className="btn primary" onClick={() => setAdding(true)}>
-            Add to Trunk Recorder Pro
-          </button>
-        </div>
-        <div className="kv muted">
+    <Page
+      title={title}
+      label={title}
+      self={`/systems/${sys.id}`}
+      fallback={[{ label: "Map", to: `/?sel=${sys.id}` }]}
+      actions={
+        <button className="btn primary" onClick={() => setAdding(true)}>
+          Add to Trunk Recorder Pro
+        </button>
+      }
+      meta={
+        <>
           <span>{TYPE[sys.type] ?? sys.type}</span>
           {sys.wacn != null && (
             <span>
@@ -66,15 +70,16 @@ export function SystemPage(props: { id: string; tab: Tab; query: URLSearchParams
           <span>
             version {sys.rev} · updated {ago(sys.updatedAt)}
           </span>
+        </>
+      }
+    >
+      {rev && (
+        <div className="banner">
+          <span>
+            This is version {rev}, as it was. <Link to={`/systems/${sys.id}${props.tab === "sites" ? "" : `/${props.tab}`}`}>See it now</Link>
+          </span>
         </div>
-        {rev && (
-          <div className="banner">
-            <span>
-              This is version {rev}, as it was. <Link to={`/systems/${sys.id}${props.tab === "sites" ? "" : `/${props.tab}`}`}>See it now</Link>
-            </span>
-          </div>
-        )}
-      </section>
+      )}
       <nav className="tabs">
         {tab("sites", `Sites (${sys.sites.length})`)}
         {tab("talkgroups", `Talkgroups (${sys.talkgroupCount})`)}
@@ -89,7 +94,7 @@ export function SystemPage(props: { id: string; tab: Tab; query: URLSearchParams
       {props.tab === "sdrs" && <SdrPlanner sys={sys} />}
       {props.tab === "history" && <History sys={sys} />}
       {adding && <AddDialog sys={sys} onClose={() => setAdding(false)} />}
-    </div>
+    </Page>
   );
 }
 
@@ -356,59 +361,58 @@ function AddDialog(props: { sys: SystemView; onClose: () => void }) {
     window.open(link(desktop), "_blank");
   };
   return (
-    <div className="modal-back" role="dialog" aria-modal="true" aria-label="Add to Trunk Recorder Pro" onClick={props.onClose} onKeyDown={(e) => e.key === "Escape" && props.onClose()} tabIndex={-1}>
-      <div className="modal stack" onClick={(e) => e.stopPropagation()}>
-        <h3>Add {props.sys.name || "this system"} to Trunk Recorder Pro</h3>
-        <p className="muted small">Its sites, channels, licenses and named talkgroups. Trunk Recorder Pro shows what it will add first, and updates the system if you already have it.</p>
-        {props.sys.sites.length > 1 && (
-          <fieldset className="stack">
-            <legend className="small muted">The sites you can receive (its talkgroups heard there come with them)</legend>
-            {props.sys.sites.map((s) => (
-              <label key={s.id} className="toggle small">
-                <input type="checkbox" checked={sites.includes(s.id)} onChange={(e) => setSites(e.target.checked ? [...sites, s.id] : sites.filter((x) => x !== s.id))} />
-                {s.rfss != null ? `${s.rfss}-${s.site}` : s.name} · {s.controlChannelsHz.map(mhz).join(", ")} MHz{s.status === "announced" ? " (announced)" : ""}
-              </label>
-            ))}
-          </fieldset>
-        )}
-        <div className="stack">
-          <b>In your browser</b>
-          <div className="row">
-            <a className={`btn primary${sites.length ? "" : " disabled"}`} href={sites.length ? link(WEB_APP) : undefined} target="_blank" rel="noreferrer">
-              Open in Trunk Recorder Pro for the web
-            </a>
-          </div>
-          <span className="muted small">Records with an RTL-SDR plugged into this computer (Chrome or Edge).</span>
-        </div>
-        <div className="stack">
-          <b>Desktop app</b>
-          <div className="row">
-            <input value={desktop} onChange={(e) => setDesktop(e.target.value)} aria-label="Your Trunk Recorder Pro's address" />
-            <button className="btn" onClick={openDesktop} disabled={!sites.length}>
-              Open in Trunk Recorder Pro
-            </button>
-          </div>
-          <span className="muted small">Its address, as you open it in your browser.</span>
-        </div>
-        <div className="stack">
-          <b>Or download it</b>
-          <div className="row">
-            <a className="btn" href={`${bundle}${q ? "&" : "?"}download=1`} download>
-              Download for Trunk Recorder Pro
-            </a>
-            <a className="btn ghost" href={`${API}/systems/${props.sys.id}/talkgroups.csv${q}`} download={`${props.sys.id}-talkgroups.csv`}>
-              Talkgroups only (CSV)
-            </a>
-          </div>
-          <span className="muted small">In Trunk Recorder Pro: Setup → Systems → Import… and choose the file.</span>
-        </div>
+    <Dialog
+      title={`Add ${nameOf(props.sys)} to Trunk Recorder Pro`}
+      onClose={props.onClose}
+      actions={
+        <button className="btn" onClick={props.onClose}>
+          Close
+        </button>
+      }
+    >
+      <p className="muted small">Its sites, channels, licenses and named talkgroups. Trunk Recorder Pro shows what it will add first, and updates the system if you already have it.</p>
+      {props.sys.sites.length > 1 && (
+        <fieldset className="stack">
+          <legend className="small muted">The sites you can receive (its talkgroups heard there come with them)</legend>
+          {props.sys.sites.map((s) => (
+            <label key={s.id} className="toggle small">
+              <input type="checkbox" checked={sites.includes(s.id)} onChange={(e) => setSites(e.target.checked ? [...sites, s.id] : sites.filter((x) => x !== s.id))} />
+              {s.rfss != null ? `${s.rfss}-${s.site}` : s.name} · {s.controlChannelsHz.map(mhz).join(", ")} MHz{s.status === "announced" ? " (announced)" : ""}
+            </label>
+          ))}
+        </fieldset>
+      )}
+      <div className="stack">
+        <b>In your browser</b>
         <div className="row">
-          <span className="spacer" />
-          <button className="btn" onClick={props.onClose}>
-            Close
+          <a className={`btn primary${sites.length ? "" : " disabled"}`} href={sites.length ? link(WEB_APP) : undefined} target="_blank" rel="noreferrer">
+            Open in Trunk Recorder Pro for the web
+          </a>
+        </div>
+        <span className="muted small">Records with an RTL-SDR plugged into this computer (Chrome or Edge).</span>
+      </div>
+      <div className="stack">
+        <b>Desktop app</b>
+        <div className="row">
+          <input value={desktop} onChange={(e) => setDesktop(e.target.value)} aria-label="Your Trunk Recorder Pro's address" />
+          <button className="btn" onClick={openDesktop} disabled={!sites.length}>
+            Open in Trunk Recorder Pro
           </button>
         </div>
+        <span className="muted small">Its address, as you open it in your browser.</span>
       </div>
-    </div>
+      <div className="stack">
+        <b>Or download it</b>
+        <div className="row">
+          <a className="btn" href={`${bundle}${q ? "&" : "?"}download=1`} download>
+            Download for Trunk Recorder Pro
+          </a>
+          <a className="btn ghost" href={`${API}/systems/${props.sys.id}/talkgroups.csv${q}`} download={`${props.sys.id}-talkgroups.csv`}>
+            Talkgroups only (CSV)
+          </a>
+        </div>
+        <span className="muted small">In Trunk Recorder Pro: Setup → Systems → Import… and choose the file.</span>
+      </div>
+    </Dialog>
   );
 }

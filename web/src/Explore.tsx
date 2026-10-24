@@ -14,7 +14,8 @@ import { TYPE_COLOR } from "./colors.ts";
 import { ALL_TYPES, KIND_LABEL, licensedShown, TypeBadge, TypeFilter, typesOf, typesParam, typesValue, withQuery, type LicensedKind } from "./filters.tsx";
 import { MapView, sitePoints, type Picked, type View } from "./MapView.tsx";
 import { best, coverage, distanceKm, level, LEVELS } from "./reception.ts";
-import { go, Link } from "./router.tsx";
+import { CloseButton } from "./Page.tsx";
+import { go, Link, setHere } from "./router.tsx";
 
 const RADII = [25, 50, 100];
 const COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
@@ -55,6 +56,8 @@ export function ExplorePage(props: { query: URLSearchParams }) {
   const view: View = at ? { center: at, zoom: Number.isFinite(z) && z > 0 ? z : me ? zoomFor(radius) : 6 } : me ? { center: me, zoom: zoomFor(radius) } : US;
   const selected = q.get("sel");
   const set = (changes: Record<string, string | null>, replace = true) => go(withQuery("/", q, changes), replace);
+  // The way back here, from a page it opens: the map, as it is then (its view and selection are in its address).
+  setHere([], "Map");
 
   const [sites, setSites] = useState<MapSite[] | null>(null);
   const [counties, setCounties] = useState<Record<string, number>>({});
@@ -223,9 +226,7 @@ export function ExplorePage(props: { query: URLSearchParams }) {
               </Link>
               {selSystem[0] && <TypeBadge type={selSystem[0].type} />}
               <span className="spacer" />
-              <button className="linkish small" onClick={() => set({ sel: null })}>
-                Clear
-              </button>
+              <CloseButton onClick={() => set({ sel: null })} label="Clear the selection" />
             </div>
             <div className="muted small">
               {selTowers} tower{selTowers === 1 ? "" : "s"}, ringed on the map · {selSystem.length} site{selSystem.length === 1 ? "" : "s"}
