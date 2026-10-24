@@ -49,7 +49,7 @@ license.
 | Where data comes from | People typing what they heard; an admin re-typing it | The recorder's own decode: identities, control channels, voice channels and talkgroups that were actually granted, call signs heard on the air. People add names and descriptions. |
 | How fresh it is | Whenever someone submits. "Last updated" is per record and often years old. | Every sharing recorder refreshes "last heard". Retired control channels and dead talkgroups age out visibly. |
 | Identity | A database ID per system (`sid`); matching the air to a record is left to the user | Records are keyed by what the air says (WACN/SysID/RFSS/Site, NAC, colour code, RAN, call sign), so a recorder can say "this is that system" by itself. |
-| Location | County membership plus hand-set rectangles, often defaults | Transmitter coordinates from FCC ULS (by call sign and frequency), plus where it was actually received (coarse cells from sharing recorders) |
+| Location | County membership plus hand-set rectangles, often defaults | Transmitter coordinates from FCC ULS (by call sign and frequency). A recorder's location is never stored. |
 | Getting it into a radio | A paid API, per-user RR login, SOAP | An open JSON API on trunkrecorder.pro; one click in TRP adds a system with its sites, talkgroups and licenses |
 | License | Private viewing only; anything else needs a license | Open data (see Licensing). FCC data is public domain. RR data is never imported. |
 | Moderation | A volunteer admin per state, reviewing everything | Facts heard on the air are applied automatically when independent recorders agree. People review only what a person wrote (names, descriptions, merges). |
@@ -71,8 +71,11 @@ We should keep what RR got right:
 3. **IDs are ours and never change. Natural keys are evidence.**
    - The air's identifiers aren't unique enough to be primary keys (see below).
    - Instead they are claims that point at a record.
-4. **Location is coarse and opt-in.** A recorder's location is never stored more
-   precisely than a cell of a few km.
+4. **Systems are where their licensed towers are; recorders are nowhere.**
+   - A share carries no location, and the server keeps none of a recorder's.
+   - A person may send a point to ask what's around it. That point answers the
+     question and is dropped.
+   - A recorder can fetch the towers and work out locally where it is relative to them.
 5. **The directory speaks TRP's config.**
    - What it hands out is `System`/`Site`/talkgroup CSV/`fcc` as `config.json` has them.
    - What it takes in is the same, plus evidence.
@@ -112,11 +115,11 @@ Here's what each protocol offers, and why none of it is a safe primary key:
 |---|---|---|---|
 | P25 Phase 1/2 trunked | `p25:{WACN}.{SysID}` | `…/{RFSS}.{Site}` | WACN BEE00 is a common default, and SysIDs repeat across WACNs. A WACN with several SysIDs is a Network. Simulcast sites share one site ID across several transmitters. |
 | P25 conventional | — | — | NAC plus frequency, near a place (a channel claim, not a system) |
-| SmartNet / SmartZone | `smartnet:{SysID}` **+ region** | `…/{site number}` | 16-bit SysIDs repeat across the country, so they only identify together with a coarse region (H3 cell, below) |
+| SmartNet / SmartZone | `smartnet:{SysID}` **+ region** | `…/{site number}` | 16-bit SysIDs repeat across the country, so they only identify together with a coarse region: the H3 resolution-3 cell of the system's licensed towers |
 | DMR Capacity Max / Tier III | `dmr-t3:{system identity code}` + region | `…/{site}` | The same, and many installs are small |
 | DMR Capacity Plus / Connect Plus | `dmr-cp:{rest channel set}` + region | — | No system ID on the air. Identified by frequency set and colour code near a place. |
 | NXDN Type-C | `nxdn:{system code}` + region | `…/{site code}` | RAN is per channel, not an identity |
-| Any | `fcc:{call sign}` | `fcc:{call sign}@{frequency}` | A call sign names a license, not a system. One license can cover many sites, and one licensee can hold several systems. It's strong evidence, but never decisive alone. |
+| Any | `fcc:{type}:{call sign}` | — | Taken from the towers a share is placed at, and from call signs heard on the air. Nationwide and strong: the systems a share's call signs name are the same system, unless the air says otherwise (a different WACN or SysID). One license can hold two systems, and they stay apart. |
 | Conventional | — | — | `{frequency}/{access code}@{cell}` |
 
 Matching scores the claims and decides:
@@ -226,26 +229,12 @@ a site's frequencies change, and monthly.
   - the FCC location's ERP and antenna height;
   - the radio horizon and a simple path-loss model (Hata-like, with no terrain at first);
   - stored as a radius.
-- **Observed coverage:**
-  - each sharing recorder reports which sites it decoded and how well, from a coarse
-    cell;
-  - over time this maps where each site is actually heard;
-  - it outranks the prediction.
+- **No observed coverage.** Where a recorder hears a site from would be the
+  recorder's location, so it isn't kept.
 
-**Indexing in D1.** D1 has no spatial index, so the plan uses H3 cells at a fixed
-resolution. Resolution 6 is about 36 km² a cell.
-- **Each site or channel location** is written to `geo_cells(cell, kind, id,
-  source, strength)`. That covers the cells of its predicted radius, and any cell a
-  recorder heard it from.
-- **"What's in range of (lat, lon)":** compute the H3 disk around the point, then
-  look those cells up with an IN-list.
-- **Results** are ranked by observed reception, then predicted strength, then
-  distance. They can be filtered by the bands the user's radios cover, and by service
-  tag.
-- **Why H3:**
-  - it's the same coarse cell used for privacy (below);
-  - it avoids ArgusRF's bounding-box scan;
-  - the same cells serve both the query and storage.
+**What's in range of (lat, lon)** is answered from the transmitters
+(`site_transmitters`), nearest first, and the point is not stored. Weak identities
+are scoped to the H3 resolution-3 region of a system's towers.
 - **States and counties** are derived from the location (point in polygon,
   FIPS) when a record is written, for browsing by place. They're labels, never
   structure: a regional system spans counties, and that's fine.
@@ -265,7 +254,7 @@ recorder's own decode.
 | System | `type`, `name`, `fcc` map, band plan, its sites' `controlChannelsHz` / `expect` / `voiceChannelsHz` / `modulation` / `lcnTableHz` / colour code / RAN |
 | Talkgroups | The talkgroup CSV rows (number, alpha tag, description, mode, tag, category) |
 | Evidence | Identity heard (from status), control channels in use and alternates heard, voice frequencies granted with counts, talkgroups granted with counts and encryption seen, neighbours, patches, call signs heard, and decode quality (control messages per second, error rate) for each site |
-| Where | The recorder's H3 cell (resolution 6), only if the user gave a location. It's used for the region and for observed coverage. |
+| Where | Nothing. The region weak identities are matched in comes from the towers the share is placed at. |
 | Provenance | App version, anonymous recorder ID (a random ID kept by the install), share time |
 | **Never** | Encryption keys, plugin settings and API keys, unit names or aliases (radio IDs are personal), recordings, paths, the short name's folder, other systems |
 
@@ -280,7 +269,7 @@ On the server:
 5. What a person wrote (names, descriptions, tags) becomes an *assertion* on that
    field. Which value shows is decided as in [Merging shares](#merging-shares-and-disagreements).
 6. Confidence rises with:
-   - independent recorders (different IDs and cells);
+   - independent recorders (different IDs);
    - recency;
    - agreement with the FCC.
 
@@ -291,7 +280,7 @@ seen and reverted as a unit ([Versioning](#versioning-and-revert)).
 
 - **Find systems:** a step in the setup guide, and a button on the Systems tab.
   - **Location:** it uses the location flow #59 built (browser location or typed).
-    The location is sent as a coarse cell, not the point.
+    The point is sent to ask what's near it, and is not stored.
   - **Results:** a list in range: name, type, distance, observed reception, whether
     the user's radios cover its band, and talkgroup count.
   - **Adding one:** creates the system, its sites, its talkgroup file and its `fcc`
@@ -330,7 +319,7 @@ searched.
   - Nothing goes to a commercial geocoder.
 - **The map:** MapLibre with OpenStreetMap vector tiles, served from R2 as one PMTiles
   file. That's cheap, and has no per-view fees.
-  - Sites are drawn as towers, and the cells they're heard in as shading.
+  - Sites are drawn as their licensed towers.
   - Conventional channels are grouped by agency.
   - Moving the map updates the list beside it.
 

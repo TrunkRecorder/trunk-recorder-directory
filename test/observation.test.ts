@@ -11,7 +11,7 @@ test("a well-formed share is kept as sent", () => {
   const o = ok();
   const p = parseObservation(JSON.parse(JSON.stringify(o)));
   assert.equal(p.recorder, o.recorder);
-  assert.equal(p.cell, DC);
+  assert.equal("cell" in p, false, "where the recorder is isn't taken");
   assert.deepEqual(p.system.sites[0].expect, { wacn: 0xbee01, sysId: 0x3a9, rfss: 1, site: 1 });
   assert.equal(p.system.sites[0].heard!.voice!.length, 1);
 });
@@ -37,7 +37,6 @@ test("a share is refused when its shape is wrong", () => {
 
 test("fields of the wrong type are dropped, not trusted", () => {
   const o: any = ok();
-  o.cell = "not a cell";
   o.app = 42;
   o.directory = { id: "sys_x", rev: "12" };
   o.system.name = "x".repeat(500);
@@ -52,7 +51,6 @@ test("fields of the wrong type are dropped, not trusted", () => {
   o.heardTalkgroups = [{ number: 100, grants: 2, sites: [0, 5, -1] }, { number: 101 }];
   o.system.fcc = { "857987600": { callSign: "WPXT459", from: "air" }, "x": { callSign: "WPXT459" }, "858000000": { callSign: "bad sign" } };
   const p = parseObservation(o);
-  assert.equal(p.cell, null);
   assert.equal(p.app, "");
   assert.equal(p.directory, null);
   assert.equal(p.system.name!.length, 80);
@@ -70,7 +68,7 @@ test("fields of the wrong type are dropped, not trusted", () => {
   assert.deepEqual(p.system.fcc, { "857987500": { callSign: "WPXT459", name: undefined, from: "air" } });
 });
 
-test("a cell is taken only as an H3 cell's shape; its resolution is checked when applied", () => {
-  assert.equal(parseObservation({ ...ok(), cell: "8a2a1072b59ffff" }).cell, "8a2a1072b59ffff");
-  assert.equal(parseObservation({ ...ok(), cell: "862AA845FFFFFFF" }).cell, null);
+test("a location sent with a share isn't kept: it never reaches the record, R2, or the database", () => {
+  const p = parseObservation({ ...ok(), cell: "862aa845fffffff", lat: 38.9, lon: -77.03 });
+  assert.deepEqual(Object.keys(p).filter((k) => ["cell", "lat", "lon"].includes(k)), []);
 });

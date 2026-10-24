@@ -3,7 +3,7 @@
 // map), and what the recorder heard of it (its decode). Version 1.
 //
 // What is never in one: keys, plugin settings, unit names or aliases, paths,
-// a point location (only an H3 cell, and only if the user gave a location).
+// or where the recorder is. (Where a system is comes from its licensed towers.)
 
 export const OBSERVATION_VERSION = 1;
 export const MAX_SITES = 64;
@@ -64,8 +64,6 @@ export interface Observation {
   /** The install's random, anonymous ID (`r_` + 10 to 26 base32). */
   recorder: string;
   app: string;
-  /** H3 resolution-6 cell of the recorder, if the user gave a location. */
-  cell?: string | null;
   /** The directory system it was imported from or shared to before, and the version it had then. */
   directory?: { id: string; rev: number } | null;
   system: {
@@ -166,7 +164,6 @@ export function parseObservation(x: unknown): Observation {
     v: 1,
     recorder: o.recorder,
     app: str(o.app, 32) ?? "",
-    cell: typeof o.cell === "string" && /^[0-9a-f]{15}$/.test(o.cell) ? o.cell : null,
     directory: dir,
     system: { type: sys.type, name: str(sys.name, 80), fcc, sites },
     talkgroups: tgs,

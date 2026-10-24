@@ -179,7 +179,7 @@ function Sites(props: { sys: SystemView }) {
               <td className="muted">{s.voiceChannelsHz.length || "—"}</td>
               <td className="mono">{hex(s.nac)}</td>
               <td className="muted small">
-                {s.status === "heard" ? `${ago(s.lastHeard)}${s.heardCells ? ` · from ${s.heardCells} place${s.heardCells === 1 ? "" : "s"}` : ""}` : "not yet"}
+                {s.status === "heard" ? ago(s.lastHeard) : "not yet"}
               </td>
               <td className="muted small">{s.neighbours.map(name).join(", ") || "—"}</td>
             </tr>

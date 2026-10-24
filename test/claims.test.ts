@@ -2,8 +2,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DEFAULT_WACN, neighbourClaim, siteClaims, systemClaim } from "../src/claims.ts";
-import { cellOf, cellsWithin, distanceKm, regionOf, regionsNear, validCell } from "../src/geo.ts";
+import { callSignClaim, DEFAULT_WACN, neighbourClaim, siteClaims, systemClaim } from "../src/claims.ts";
+import { cellOf, distanceKm, regionOf, regionsNear } from "../src/geo.ts";
 import { DC, DENVER } from "./helpers.ts";
 
 const region = regionOf(DC);
@@ -43,16 +43,17 @@ test("a neighbour's claim is under the announcing site's system (its own SysID i
   assert.equal(neighbourClaim("smartnet", id, { rfss: 1, site: 2 }, region), null);
 });
 
-test("cells: a resolution-6 cell or nothing; regions; cells in a radius; distances", () => {
-  assert.equal(validCell(DC), DC);
-  assert.equal(validCell(regionOf(DC)), null, "a resolution-3 cell isn't a recorder's cell");
-  assert.equal(validCell("ffffffffffffff"), null);
-  assert.equal(validCell(null), null);
+test("regions (where a system's towers are) and distances", () => {
   assert.equal(cellOf(38.9, -77.03), DC);
   assert.equal(regionsNear(region).length, 7);
   assert.notEqual(regionOf(DC), regionOf(DENVER));
-  assert.ok(cellsWithin(DC, 0).length === 1 && cellsWithin(DC, 50).length > 100);
-  assert.equal(cellsWithin(DC, 10_000).length, cellsWithin(DC, 260).length, "bounded");
   const d = distanceKm([38.9, -77.03], [39.74, -104.99]);
   assert.ok(d > 2390 && d < 2420, `${d}`);
+});
+
+test("an FCC call sign is a strong claim, nationwide, of its type", () => {
+  const c = callSignClaim("p25", " wpxt459 ")!;
+  assert.deepEqual(c, { store: ["fcc:p25:WPXT459"], lookup: ["fcc:p25:WPXT459"], strong: true });
+  assert.notDeepEqual(callSignClaim("smartnet", "WPXT459"), c, "the same license's other system isn't it");
+  assert.equal(callSignClaim("p25", "not a sign"), null);
 });

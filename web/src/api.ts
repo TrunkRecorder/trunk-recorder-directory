@@ -15,7 +15,6 @@ export interface SiteView {
   neighbours: string[];
   firstHeard: number | null;
   lastHeard: number | null;
-  heardCells: number;
 }
 
 export interface SystemView {
@@ -49,16 +48,6 @@ export interface TalkgroupView {
   encrypted: boolean;
   sites: string[];
   alternatives?: { field: string; value: string; supporters: number }[];
-}
-
-export interface NearResult {
-  id: string;
-  name: string;
-  type: string;
-  sitesHeard: number;
-  distanceKm: number;
-  talkgroupCount: number;
-  lastHeard: number | null;
 }
 
 export interface SearchHit {

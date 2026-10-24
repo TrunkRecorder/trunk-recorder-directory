@@ -98,17 +98,6 @@ test("a neighbour with another SysID isn't made a site of this system", async ()
   assert.deepEqual(sites.map((x: any) => [x.rfss, x.site, x.status]), [[1, 1, "heard"], [1, 2, "announced"]]);
 });
 
-test("a recorder's place counts once per cell; the system is found from both", async () => {
-  const d = directory();
-  const r = recorder();
-  const a = await d.share(obs(r, [p25Site(1, 1, 851e6)], { cell: DC }));
-  await d.share(obs(r, [p25Site(1, 1, 851e6)], { cell: DC }));
-  await d.share(obs(recorder(), [p25Site(1, 1, 851e6)], { cell: ARLINGTON }));
-  assert.equal((await d.get(`/systems/${a.json.system}`)).json.sites[0].heardCells, 2);
-  const near = (await d.get("/systems?lat=38.9&lon=-77.03&radiusKm=25")).json.systems;
-  assert.equal(near[0].id, a.json.system);
-});
-
 test("each share is kept as it came, and recorded", async () => {
   const d = directory();
   const r = recorder();

@@ -98,7 +98,6 @@ and is rate-limited. Stewards' and admins' actions need `ADMIN_TOKEN` (bearer) u
 
 | | |
 |---|---|
-| `GET /systems?lat=&lon=&radiusKm=` (or `cell=`, an H3 resolution-6 cell) | Systems heard in range |
 | `GET /systems/{id}[?rev=]` | A system (as it was at a version); a merged ID redirects (301) to the system it went into |
 | `GET /systems/{id}/talkgroups[.csv][?rev=&sites=]` | Its talkgroups, with where each is heard and the other names people gave; `sites=`: what's heard there |
 | `GET /systems/{id}/config[?sites=&download=1]` | Ready for TRP: a bundle (`format: "trp-system"`, `v: 1`): its `System` (with `directory: {id, rev}`; an unnamed one's short name from its licensee), its named talkgroups as `talkgroupsCsv`, and `source` (this directory, its ID, version, licensee). TRP opens it from `#import=<this URL>` links (the site's "Open in Trunk Recorder Pro") or as a file (Setup → Import…) |
@@ -107,7 +106,7 @@ and is rate-limited. Stewards' and admins' actions need `ADMIN_TOKEN` (bearer) u
 | `GET /places`, `/places/{ST}`, `/places/{ST}/{county}`, `/places/{ST}/{county}/{place}` | By place: states with counts by type; a state's counties and regional systems; a county's systems and cities; a city's systems (Census GEOIDs) |
 | `GET /map/sites`, `GET /map/counties` | Every placed site with its transmitters; each county's count of systems |
 | `GET /map/callsigns` | The call signs shared systems have (the map leaves them off its licensed layer, which is the site's files: `/directory/geo/licensed/`) |
-| `GET /nearby?lat=&lon=[&coarse=1]&radiusKm=` (or `cell=`) | Systems with a transmitter in range, nearest first, with their transmitters (power, height, frequency) |
+| `GET /nearby?lat=&lon=[&coarse=1]&radiusKm=` | Systems with a transmitter in range, nearest first, with their transmitters (power, height, frequency). The point isn't stored. |
 | `GET /identify?claim=p25:bee00.3a9/1.5` | What an identity heard on the air is |
 | `POST /observations` | A share from TRP (`src/observation.ts`) |
 | `POST /changesets/{id}/revert`, `POST /systems/{id}/revert {to}`, `POST /actors/{id}/revert` | Revert (token) |

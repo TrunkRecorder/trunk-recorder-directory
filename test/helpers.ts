@@ -6,7 +6,9 @@ import type { Observation, ObservedSite } from "../src/observation.ts";
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { regionOf } from "../src/geo.ts";
 import { Places } from "../src/places.ts";
+import { ownCallSigns } from "../src/share.ts";
 import { fccSqlite, sqlite } from "../src/sqlite.ts";
 
 export const TOKEN = "test-admin-token";
@@ -25,9 +27,12 @@ export function directory(opts: { place?: boolean } = {}) {
   if (opts.place) db.raw.exec(readFileSync(join(import.meta.dirname, "fixtures", "places.sql"), "utf8"));
   const kept: Record<string, string> = {};
   let clock = Date.UTC(2026, 9, 21);
+  // Where the next share is from: its towers' region. With the FCC fixture (place), its real towers;
+  // without, the test says (as `cell` on its observation, never sent: the region its towers would be in).
+  let region: string | null = regionOf(DC);
   const env = {
     db, adminToken: TOKEN, putObservation: async (k: string, b: string) => void (kept[k] = b), now: () => (clock += 1000),
-    ...(opts.place ? { fcc: fccSqlite(), places: fixturePlaces() } : {}),
+    ...(opts.place ? { fcc: fccSqlite(), places: fixturePlaces() } : { towersOf: async (o: Observation) => ({ region, callSigns: ownCallSigns(o).callSigns }) }),
   };
   const call = async (method: string, path: string, body?: unknown, admin = false) => {
     const res = await handle(env, new Request(`http://x${BASE}${path}`, {
@@ -51,7 +56,11 @@ export function directory(opts: { place?: boolean } = {}) {
     get: (p: string) => call("GET", p),
     post: (p: string, b?: unknown, admin = true) => call("POST", p, b, admin),
     del: (p: string, admin = true) => call("DELETE", p, undefined, admin),
-    share: (o: Observation) => call("POST", "/observations", o, false),
+    share: (o: TestObservation) => {
+      const { cell, ...rest } = o;
+      region = cell === null ? null : regionOf(cell ?? DC);
+      return call("POST", "/observations", rest, false);
+    },
   };
 }
 
@@ -84,6 +93,9 @@ export const recorder = () => {
   return `r_${s}`;
 };
 
-export function obs(rec: string, sites: ObservedSite[], more: Partial<Observation> = {}): Observation {
-  return { v: 1, recorder: rec, app: "test", cell: DC, system: { type: "p25", name: "DC Fire and EMS", sites }, talkgroups: [], heardTalkgroups: [], ...more };
+/** An observation for a test, with where its towers are (`cell`: the region they'd be in; null: none found). Never sent. */
+export type TestObservation = Observation & { cell?: string | null };
+
+export function obs(rec: string, sites: ObservedSite[], more: Partial<TestObservation> = {}): TestObservation {
+  return { v: 1, recorder: rec, app: "test", system: { type: "p25", name: "DC Fire and EMS", sites }, talkgroups: [], heardTalkgroups: [], ...more };
 }
