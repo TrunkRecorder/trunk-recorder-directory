@@ -3,7 +3,7 @@
 // adding it to Trunk Recorder Pro; and the SDRs it takes (Sdrs.tsx).
 
 import { useEffect, useMemo, useState } from "react";
-import { ago, get, hex, mhz, NotFound, titleCase, TYPE, API, type HistoryEntry, type SystemView, type TalkgroupView } from "./api.ts";
+import { ago, get, hex, mhz, nameOf, NotFound, TYPE, API, type HistoryEntry, type SystemView, type TalkgroupView } from "./api.ts";
 import { go, Link } from "./router.tsx";
 import { MapView } from "./MapView.tsx";
 import { SdrPlanner } from "./Sdrs.tsx";
@@ -45,7 +45,7 @@ export function SystemPage(props: { id: string; tab: Tab; query: URLSearchParams
     <div className="stack">
       <section className="stack">
         <div className="row">
-          <h1>{sys.name || (where?.transmitters[0]?.licensee ? titleCase(where.transmitters[0].licensee) : "Unnamed system")}</h1>
+          <h1>{nameOf(sys)}</h1>
           <span className="spacer" />
           <button className="btn primary" onClick={() => setAdding(true)}>
             Add to Trunk Recorder Pro

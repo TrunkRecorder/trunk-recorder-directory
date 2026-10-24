@@ -27,6 +27,8 @@ export interface SystemView {
   rev: number;
   type: string;
   name: string;
+  /** Who holds most of its towers' licenses (place.ts): what it's called when no one has named it. */
+  licensee: string;
   wacn: number | null;
   sysId: number | null;
   status: string;
@@ -164,6 +166,7 @@ function systemView(recs: Records): SystemView | null {
     rev: s.rev as number,
     type: s.type as string,
     name: s.name as string,
+    licensee: (s.licensee as string | undefined) ?? "",
     wacn: s.wacn as number | null,
     sysId: s.sys_id as number | null,
     status: s.status as string,
