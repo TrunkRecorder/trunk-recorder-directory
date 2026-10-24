@@ -3,15 +3,16 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { ObservedSite } from "../src/observation.ts";
 import { sameSite } from "../src/sites.ts";
 import { directory, obs, p25Site, recorder } from "./helpers.ts";
 
 /** WMATA's site as TRP shares it: SmartNet site 1, its control channels; no name. */
-const wmata = (more: Record<string, unknown> = {}) => {
+const wmata = (more: Partial<ObservedSite> = {}): ObservedSite => {
   const cc = [490_787_500, 490_862_500, 496_437_500, 496_537_500];
   return { controlChannelsHz: cc, expect: { sysId: 0x8209, site: 1 }, heard: { identity: { sysId: 0x8209, site: 1 }, controlChannelHz: cc[0], voice: [{ freqHz: 490_762_500, grants: 3 }], neighbours: [], callSigns: [], good: 500, bad: 2 }, ...more };
 };
-const smartnet = (site: ReturnType<typeof wmata>, more = {}) => obs(recorder(), [site], { system: { type: "smartnet", name: "", sites: [site] }, ...more });
+const smartnet = (site: ObservedSite, more = {}) => obs(recorder(), [site], { system: { type: "smartnet", name: "", sites: [site] }, ...more });
 
 test("the same site: by its numbers when both have them, else by a control channel in common", () => {
   assert.ok(sameSite({ rfss: 1, site: 3, controlHz: [851e6] }, { rfss: 1, site: 3, controlHz: [852e6] }));
