@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react";
 import { ago, get, nameOf, NotFound, TYPE, type SystemSummary } from "./api.ts";
 import { TypeBadge, TypeFilter, typesOf, typesParam, typesValue, withQuery } from "./filters.tsx";
+import { Page } from "./Page.tsx";
 import { go, Link } from "./router.tsx";
 
 interface StateRow { state: string; name: string; systems: number; byType: Record<string, number> }
@@ -162,19 +163,11 @@ export function BrowsePage(props: { path: string; query: URLSearchParams }) {
     );
   }
 
+  const title = st ? crumbs[crumbs.length - 1][0] : "Systems by place";
   return (
-    <div className="stack">
-      <nav className="crumbs small" aria-label="Where">
-        {crumbs.map(([label, to], i) => (
-          <span key={to}>
-            {i > 0 && <span className="muted"> › </span>}
-            {i === crumbs.length - 1 ? <b>{label}</b> : <Link to={to}>{label}</Link>}
-          </span>
-        ))}
-      </nav>
-      <h1>{st ? crumbs[crumbs.length - 1][0] : "Systems by place"}</h1>
+    <Page title={title} label={title} self={props.path} trail={st ? crumbs.slice(0, -1).map(([label, to]) => ({ label, to })) : [{ label: "Map", to: "/" }]}>
       <TypeFilter types={types} onChange={(x) => go(withQuery(props.path, props.query, { types: typesValue(x) }), true)} />
       {body}
-    </div>
+    </Page>
   );
 }

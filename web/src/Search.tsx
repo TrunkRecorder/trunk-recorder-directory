@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { get, type PlaceHit, type SearchHit } from "./api.ts";
 import { TypeFilter, typesOf, typesParam, typesValue, withQuery } from "./filters.tsx";
+import { Page } from "./Page.tsx";
 import { go, Link } from "./router.tsx";
 
 const KIND: Record<string, string> = { system: "System", site: "Site", talkgroup: "Talkgroup", frequency: "Frequency", license: "FCC license", identity: "Identity" };
@@ -36,8 +37,7 @@ export function SearchPage(props: { query: URLSearchParams }) {
   for (const h of hits ?? []) bySystem.set(h.systemId, [...(bySystem.get(h.systemId) ?? []), h]);
 
   return (
-    <div className="stack">
-      <h1>{q ? <>Search: “{q}”</> : "Search"}</h1>
+    <Page title={q ? <>Search: “{q}”</> : "Search"} label={q ? `Search: “${q}”` : "Search"} self="/search">
       <p className="muted small">A system's name, who holds its licenses, an FCC call sign, a frequency (857.9875), an identity (BEE00.3A9), or a county or city.</p>
       <TypeFilter types={types} onChange={(t) => go(withQuery("/search", props.query, { types: typesValue(t) }), true)} />
       {error && <div className="banner bad">{error}</div>}
@@ -74,6 +74,6 @@ export function SearchPage(props: { query: URLSearchParams }) {
           </ul>
         </section>
       )}
-    </div>
+    </Page>
   );
 }
