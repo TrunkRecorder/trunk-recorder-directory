@@ -21,8 +21,8 @@ import { type Db, type Row, insertRows, marks } from "./db.ts";
 import { cellOf, distanceKm, regionOf } from "./geo.ts";
 import type { Observation } from "./observation.ts";
 import type { Places } from "./places.ts";
-import { callSignClaim } from "./claims.ts";
-import { claim, reindex } from "./share.ts";
+import { callSignClaim, type ClaimKeys, systemClaim } from "./claims.ts";
+import { claim, lookupClaims, reindex } from "./share.ts";
 import { ChangeSet } from "./store.ts";
 
 const HALF_CHANNEL = 3125;
@@ -274,4 +274,32 @@ export async function sameTowers(db: Db, systemId: string): Promise<string[]> {
     [systemId],
   );
   return rows.map((r) => r.id);
+}
+
+/**
+ * Other systems with system `systemId`'s identity where its licensed towers
+ * are: a weak identity (a default WACN, a SmartNet SysID) is claimed in each
+ * region its towers are in, and another active system of its type holding it
+ * in one of them or one around is the same system, shared from another part
+ * of it (a statewide system whose recorders hear different ends of it).
+ */
+export async function sameIdentityNearby(db: Db, systemId: string, now: number): Promise<string[]> {
+  const sys = (await db.all<Row>("SELECT type, wacn, sys_id FROM systems WHERE id = ?", [systemId]))[0];
+  if (!sys) return [];
+  const tx = await db.all<{ lat: number; lon: number }>("SELECT DISTINCT x.lat, x.lon FROM site_transmitters x JOIN sites s ON s.id = x.site_id WHERE s.system_id = ?", [systemId]);
+  const id = { wacn: (sys.wacn as number | null) ?? undefined, sysId: (sys.sys_id as number | null) ?? undefined };
+  const claims = [...new Set(tx.map((t) => regionOf(cellOf(t.lat, t.lon))))]
+    .map((r) => systemClaim(sys.type as string, id, r))
+    .filter((c): c is ClaimKeys => !!c && c.store[0].includes("@"));
+  if (!claims.length) return [];
+  const cs = new ChangeSet(db, { actorKind: "system", actorId: "fcc", kind: "edit", note: "its identity where its towers are" }, now);
+  await claim(cs, claims, "system", systemId);
+  const out: string[] = [];
+  for (const h of await lookupClaims(cs, claims, "system")) {
+    if (h.id === systemId || out.includes(h.id)) continue;
+    const other = (await db.all<Row>("SELECT type, status FROM systems WHERE id = ?", [h.id]))[0];
+    if (other?.status === "active" && other.type === sys.type) out.push(h.id);
+  }
+  await cs.commit();
+  return out;
 }

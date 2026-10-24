@@ -12,7 +12,7 @@ import { NameIndex } from "./names.ts";
 import { Invalid, parseObservation, type Observation } from "./observation.ts";
 import { changeset, diff, getSystem, getTalkgroups, history, search, talkgroupsCsv, trpSystem } from "./read.ts";
 import { city, county, countyCounts, mapSites, nearby, parseTypes, placesNamed, sharedCallSigns, state, states, where } from "./explore.ts";
-import { placeSystem, sameTowers, shareTowers } from "./place.ts";
+import { placeSystem, sameIdentityNearby, sameTowers, shareTowers } from "./place.ts";
 import type { Places } from "./places.ts";
 import { revertActor, revertChangeset, revertSystemTo } from "./revert.ts";
 import { applyShare, matchShare, ownCallSigns, reindex, resolve, type ShareFrom } from "./share.ts";
@@ -35,13 +35,17 @@ export interface Env {
 
 const MAX_BODY = 4 << 20;
 
-/** Place a system's sites; another record on its very towers is this system, found twice: merged into one. */
+/** Place a system's sites; another record on its very towers, or with its identity where they are, is this system, found twice: merged into one. */
 async function placeJoining(db: Db, fcc: Db, places: Places, systemId: string, opts: { now: number; force?: boolean }) {
   const placed = await placeSystem(db, fcc, places, systemId, opts);
   const merged: string[] = [];
-  for (const twin of await sameTowers(db, systemId)) {
-    const why = "its licensed towers are this one's";
-    const [keep, gone] = await keeper(db, systemId, twin);
+  const twins: [string, string][] = [
+    ...(await sameTowers(db, systemId)).map((id): [string, string] => [id, "its licensed towers are this one's"]),
+    ...(await sameIdentityNearby(db, systemId, opts.now)).map((id): [string, string] => [id, "the same identity, where its licensed towers are"]),
+  ];
+  for (const [twin, why] of twins) {
+    if (merged.includes(twin) || (await resolve(db, twin)) === systemId) continue;
+    const [keep, gone] = await keeper(db, systemId, await resolve(db, twin));
     systemId = (await mergeSystems(db, keep, gone, { actorKind: "system", actorId: "matcher", note: why }, why)).kept;
     merged.push(gone);
   }
