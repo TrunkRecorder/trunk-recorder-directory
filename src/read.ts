@@ -353,7 +353,7 @@ export async function search(db: Db, q: string, opts: { system?: string; limit?:
   const names = new Map<string, string>();
   const nameOf = async (id: string) => {
     // (Unnamed: who holds its licenses.)
-    if (!names.has(id)) names.set(id, ((await first<Row>(db, "SELECT COALESCE(NULLIF(y.name, ''), (SELECT x.licensee FROM site_transmitters x JOIN sites s ON s.id = x.site_id WHERE s.system_id = y.id AND x.licensee != '' LIMIT 1), '') AS name FROM systems y WHERE y.id = ?", [id]))?.name as string) ?? "");
+    if (!names.has(id)) names.set(id, ((await first<Row>(db, "SELECT COALESCE(NULLIF(name, ''), licensee) AS name FROM systems WHERE id = ?", [id]))?.name as string) ?? "");
     return names.get(id)!;
   };
   const hits: SearchHit[] = [];

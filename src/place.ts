@@ -191,6 +191,13 @@ export async function placeSystem(db: Db, fcc: Db, places: Places, systemId: str
   }
   if (!cs.empty) cs.bump(systemId);
   await cs.commit();
+  // Who holds its licenses (the most of its transmitters'): one value every list, search and export reads.
+  if (stmts.length)
+    stmts.push({
+      sql: `UPDATE systems SET licensee = COALESCE((SELECT x.licensee FROM site_transmitters x JOIN sites s ON s.id = x.site_id
+              WHERE s.system_id = systems.id AND x.licensee != '' GROUP BY x.licensee ORDER BY COUNT(*) DESC LIMIT 1), '') WHERE id = ?`,
+      params: [systemId],
+    });
   if (stmts.length) await db.batch(stmts);
   if (out.placed.length) await reindex(db, systemId);
   return out;

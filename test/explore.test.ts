@@ -64,7 +64,9 @@ test("the map: every placed site with its transmitters, and each county's count"
   const s = sites.find((x: any) => x.system === dcfd);
   assert.equal(s.at.length, 10);
   assert.equal(s.name, "DC Fire and EMS");
-  assert.match(sites.find((x: any) => x.system === wmata).name, /Metropolitan Area Transit/i, "named by its licensee until it has a name");
+  const w = sites.find((x: any) => x.system === wmata);
+  assert.equal(w.name, "", "its name: none yet");
+  assert.match(w.licensee, /Metropolitan Area Transit/i, "who holds its licenses, apart (the page shows it until it has a name)");
   assert.equal((await d.get("/map/sites?types=smartnet")).json.sites.length, 1);
   const counties = (await d.get("/map/counties")).json.counties;
   assert.equal(counties["11001"], 2);
@@ -163,4 +165,13 @@ test("an unnamed system's bundle: named by who holds its licenses", async () => 
   assert.match(b.source.licensee, /Metropolitan Area Transit/i);
   assert.equal(b.system.shortName, "washington-metropolitan");
   assert.equal(b.system.name, undefined);
+});
+
+test("a system's licensee is one value, kept when it's placed: lists, search and its bundle read it", async () => {
+  const { d, wmata } = await twoSystems();
+  const row = (await d.db.all<any>("SELECT licensee FROM systems WHERE id = ?", [wmata]))[0];
+  assert.match(row.licensee, /Metropolitan Area Transit/i);
+  assert.equal((await d.get("/places/DC/11001")).json.systems.find((s: any) => s.id === wmata).licensee, row.licensee);
+  assert.equal((await d.get("/search?q=metropolitan")).json.hits.find((h: any) => h.systemId === wmata).systemName, row.licensee);
+  assert.equal((await d.get(`/systems/${wmata}/config`)).json.source.licensee, row.licensee);
 });

@@ -254,10 +254,10 @@ export function MapView(props: {
 }
 
 /** Transmitters as map points. */
-export function sitePoints(sites: { site: string; system: string; name: string; type: string; stale: boolean; at: [number, number][] }[]): FeatureCollection<Point> {
+export function sitePoints(sites: { site: string; system: string; name: string; licensee?: string; type: string; stale: boolean; at: [number, number][] }[]): FeatureCollection<Point> {
   return {
     type: "FeatureCollection",
-    features: sites.flatMap((s) => s.at.map(([lat, lon]) => ({ type: "Feature" as const, properties: { site: s.site, system: s.system, name: s.name, type: s.type, stale: s.stale }, geometry: { type: "Point" as const, coordinates: [lon, lat] } }))),
+    features: sites.flatMap((s) => s.at.map(([lat, lon]) => ({ type: "Feature" as const, properties: { site: s.site, system: s.system, name: s.name || s.licensee || "", type: s.type, stale: s.stale }, geometry: { type: "Point" as const, coordinates: [lon, lat] } }))),
   };
 }
 
