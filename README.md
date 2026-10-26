@@ -60,6 +60,8 @@ The landing page stays its own static site ([trunk-recorder-pro-site](https://gi
 | `src/read.ts` | A system as it is or was, talkgroups, near a place, search, history, diffs, TRP's config |
 | `src/place.ts`, `src/places.ts` | Placing sites from FCC licenses; which county and city a point is in |
 | `src/explore.ts` | By place (state → county → city), the map's layers, near a point, licensed systems not shared yet |
+| `src/licensed.ts` | A system known only by its license (`fcc_<call sign>`): one no one has shared, read as any system is (its page, bundle and SDR plan), its sites the license's stations |
+| `src/stations.ts` | Licensed base and repeater stations: what placing sites, the licensed layer and licensed systems read |
 | `src/tiles.ts` | The basemap: vector tiles from one PMTiles file in R2; uploading it |
 | `src/geo.ts` | H3 cells (D1 has no spatial index) |
 | `migrations/` | The D1 schema |

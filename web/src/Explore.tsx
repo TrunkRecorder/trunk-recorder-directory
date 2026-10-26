@@ -16,6 +16,7 @@ import { MapView, sitePoints, type Picked, type View } from "./MapView.tsx";
 import { best, coverage, distanceKm, level, LEVELS } from "./reception.ts";
 import { CloseButton } from "./Page.tsx";
 import { go, Link, setHere } from "./router.tsx";
+import { licensedId } from "../../src/ids.ts";
 
 const RADII = [25, 50, 100];
 const COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
@@ -239,7 +240,9 @@ export function ExplorePage(props: { query: URLSearchParams }) {
         )}
         {picked?.kind === "licensed" && (
           <div className="card">
-            <div className="card-title">{titleCase(String(picked.props.licensee)) || String(picked.props.callSign)}</div>
+            <Link to={`/systems/${licensedId(String(picked.props.callSign))}`} className="card-title">
+              {titleCase(String(picked.props.licensee)) || String(picked.props.callSign)}
+            </Link>
             <div className="row small">
               <span className="kind-badge" data-kind={String(picked.props.kind)}>
                 {KIND_LABEL[String(picked.props.kind)]}
@@ -250,6 +253,9 @@ export function ExplorePage(props: { query: URLSearchParams }) {
               {String(picked.props.callSign)} · {String(picked.props.serviceDesc)} · {licensed.filter((l) => l.callSign === picked.props.callSign).length} towers, ringed on the map
             </div>
             <p className="small">Licensed, but no one has shared it yet. Recording it with Trunk Recorder Pro? Turn on Share in its Setup.</p>
+            <div className="row small">
+              <Link to={`/systems/${licensedId(String(picked.props.callSign))}`}>Its sites and licenses, and adding it to Trunk Recorder Pro</Link>
+            </div>
           </div>
         )}
         {picked?.kind === "county" && (
@@ -370,7 +376,9 @@ export function ExplorePage(props: { query: URLSearchParams }) {
                   onClick={() => setLicense(license === l.callSign ? null : l.callSign)}
                 >
                   <div className="row">
-                    <span className="card-title">{titleCase(l.licensee) || l.callSign}</span>
+                    <Link to={`/systems/${licensedId(l.callSign)}`} className="card-title">
+                      {titleCase(l.licensee) || l.callSign}
+                    </Link>
                     <span className="kind-badge" data-kind={l.kind}>
                       {KIND_LABEL[l.kind]}
                     </span>

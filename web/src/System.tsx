@@ -1,9 +1,14 @@
 // A system: its sites (heard, and announced by neighbours), talkgroups (with
 // the other names people gave), licenses, and history; any version of it; and
-// adding it to Trunk Recorder Pro; and the SDRs it takes (Sdrs.tsx).
+// adding it to Trunk Recorder Pro; and the SDRs it takes (Sdrs.tsx). A system
+// known only by its license (status "licensed": no one has shared it) is
+// shown the same way, with what a license can't say left out: its sites are
+// the license's stations with their frequencies, and it has no talkgroups or
+// history; Trunk Recorder Pro's survey finds it by its licenses.
 
 import { useEffect, useMemo, useState } from "react";
-import { ago, get, hex, mhz, nameOf, NotFound, TYPE, API, type HistoryEntry, type SystemView, type TalkgroupView } from "./api.ts";
+import { ago, get, hex, mhz, nameOf, NotFound, siteLabel, TYPE, API, type HistoryEntry, type SystemView, type TalkgroupView, type Where as WhereView } from "./api.ts";
+import { KIND_LABEL } from "./filters.tsx";
 import { go, Link } from "./router.tsx";
 import { MapView } from "./MapView.tsx";
 import { Dialog, Page } from "./Page.tsx";
@@ -36,7 +41,9 @@ export function SystemPage(props: { id: string; tab: Tab; query: URLSearchParams
 
   if (error) return <div className="banner bad">{error}</div>;
   if (!sys) return <p className="muted">Loading…</p>;
+  const licensed = sys.status === "licensed";
   const heard = sys.sites.filter((s) => s.status === "heard").length;
+  const callSigns = [...new Set(Object.values(sys.licenses).map((l) => l.callSign))];
   const tab = (t: Tab, label: string) => (
     <Link to={`/systems/${sys.id}${t === "sites" ? "" : `/${t}`}${at}`} className={`tab${props.tab === t ? " on" : ""}`}>
       {label}
@@ -48,13 +55,24 @@ export function SystemPage(props: { id: string; tab: Tab; query: URLSearchParams
       title={title}
       label={title}
       self={`/systems/${sys.id}`}
-      fallback={[{ label: "Map", to: `/?sel=${sys.id}` }]}
+      fallback={[{ label: "Map", to: licensed ? `/?licensed=1&at=${sys.lat},${sys.lon}&z=10` : `/?sel=${sys.id}` }]}
       actions={
         <button className="btn primary" onClick={() => setAdding(true)}>
           Add to Trunk Recorder Pro
         </button>
       }
       meta={
+        licensed ? (
+          <>
+            <span className="kind-badge" data-kind={sys.type}>
+              {KIND_LABEL[sys.type]}
+            </span>
+            <span className="mono">{callSigns.join(", ")}</span>
+            <span>
+              {sys.sites.length} licensed site{sys.sites.length === 1 ? "" : "s"} · {Object.keys(sys.licenses).length} frequencies
+            </span>
+          </>
+        ) : (
         <>
           <span>{TYPE[sys.type] ?? sys.type}</span>
           {sys.wacn != null && (
@@ -71,6 +89,7 @@ export function SystemPage(props: { id: string; tab: Tab; query: URLSearchParams
             version {sys.rev} · updated {ago(sys.updatedAt)}
           </span>
         </>
+        )
       }
     >
       {rev && (
@@ -80,12 +99,17 @@ export function SystemPage(props: { id: string; tab: Tab; query: URLSearchParams
           </span>
         </div>
       )}
+      {licensed && (
+        <div className="banner">
+          Licensed, but no one has shared it yet: this is what its FCC license says. Which frequency is its control channel, its identity and its talkgroups come from the air: add it to Trunk Recorder Pro, and its survey looks for it.
+        </div>
+      )}
       <nav className="tabs">
         {tab("sites", `Sites (${sys.sites.length})`)}
-        {tab("talkgroups", `Talkgroups (${sys.talkgroupCount})`)}
+        {!licensed && tab("talkgroups", `Talkgroups (${sys.talkgroupCount})`)}
         {tab("licenses", `Licenses (${Object.keys(sys.licenses).length})`)}
         {tab("sdrs", "SDRs needed")}
-        {tab("history", "History")}
+        {!licensed && tab("history", "History")}
       </nav>
       {props.tab === "sites" && where && <Where sys={sys} w={where} />}
       {props.tab === "sites" && <Sites sys={sys} />}
@@ -96,11 +120,6 @@ export function SystemPage(props: { id: string; tab: Tab; query: URLSearchParams
       {adding && <AddDialog sys={sys} onClose={() => setAdding(false)} />}
     </Page>
   );
-}
-
-interface WhereView {
-  transmitters: { site: string; callSign: string; licensee: string; lat: number; lon: number; heightM: number | null; erpW: number | null; state: string; county: string; countyName: string; place: string; placeName: string }[];
-  placements: { site: string; method: string; note: string }[];
 }
 
 /** Where it is: its sites' licensed transmitters on a map, and the counties and cities they're in. */
@@ -152,7 +171,7 @@ function Where(props: { sys: SystemView; w: WhereView }) {
             </span>
           ))}
         </div>
-        <p className="muted">Placed from its FCC licenses: the base and repeater stations licensed on its frequencies.</p>
+        <p className="muted">{props.sys.status === "licensed" ? "From its FCC license: its base and repeater stations." : "Placed from its FCC licenses: the base and repeater stations licensed on its frequencies."}</p>
       </div>
     </section>
   );
@@ -161,8 +180,31 @@ function Where(props: { sys: SystemView; w: WhereView }) {
 function Sites(props: { sys: SystemView }) {
   const name = (id: string) => {
     const s = props.sys.sites.find((x) => x.id === id);
-    return s ? (s.rfss != null ? `${s.rfss}-${s.site}` : s.name || id) : id;
+    return s ? siteLabel(s) : id;
   };
+  if (props.sys.status === "licensed")
+    return (
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Site</th>
+              <th>Licensed frequencies (MHz)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {props.sys.sites.map((s) => (
+              <tr key={s.id}>
+                <td>
+                  <b>{siteLabel(s)}</b>
+                </td>
+                <td className="mono small">{s.licensedHz.map(mhz).join(", ")}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
   return (
     <div className="table-wrap">
       <table>
@@ -339,8 +381,9 @@ function History(props: { sys: SystemView }) {
 const WEB_APP = "https://trunkrecorder.pro/app";
 
 function AddDialog(props: { sys: SystemView; onClose: () => void }) {
-  const heard = props.sys.sites.filter((s) => s.status === "heard");
-  const [sites, setSites] = useState<string[]>(heard.map((s) => s.id));
+  const licensed = props.sys.status === "licensed";
+  // The sites offered at first: those heard (a licensed system's: all).
+  const [sites, setSites] = useState<string[]>(props.sys.sites.filter((s) => licensed || s.status === "heard").map((s) => s.id));
   const [desktop, setDesktop] = useState(() => {
     try {
       return localStorage.getItem("trp.directory.desktop") ?? "http://localhost:8080";
@@ -370,14 +413,19 @@ function AddDialog(props: { sys: SystemView; onClose: () => void }) {
         </button>
       }
     >
-      <p className="muted small">Its sites, channels, licenses and named talkgroups. Trunk Recorder Pro shows what it will add first, and updates the system if you already have it.</p>
+      <p className="muted small">
+        {licensed
+          ? "No one has shared it, so what comes is its licenses: the frequencies licensed at the sites you choose. Trunk Recorder Pro's survey looks for it on them, and the control channel it finds sets the system up."
+          : "Its sites, channels, licenses and named talkgroups. Trunk Recorder Pro shows what it will add first, and updates the system if you already have it."}
+      </p>
       {props.sys.sites.length > 1 && (
         <fieldset className="stack">
-          <legend className="small muted">The sites you can receive (its talkgroups heard there come with them)</legend>
+          <legend className="small muted">The sites you can receive{licensed ? "" : " (its talkgroups heard there come with them)"}</legend>
           {props.sys.sites.map((s) => (
             <label key={s.id} className="toggle small">
               <input type="checkbox" checked={sites.includes(s.id)} onChange={(e) => setSites(e.target.checked ? [...sites, s.id] : sites.filter((x) => x !== s.id))} />
-              {s.rfss != null ? `${s.rfss}-${s.site}` : s.name} · {s.controlChannelsHz.map(mhz).join(", ")} MHz{s.status === "announced" ? " (announced)" : ""}
+              {siteLabel(s)} · {licensed ? `${s.licensedHz.length} licensed frequencies` : `${s.controlChannelsHz.map(mhz).join(", ")} MHz`}
+              {s.status === "announced" ? " (announced)" : ""}
             </label>
           ))}
         </fieldset>
@@ -407,9 +455,11 @@ function AddDialog(props: { sys: SystemView; onClose: () => void }) {
           <a className="btn" href={`${bundle}${q ? "&" : "?"}download=1`} download>
             Download for Trunk Recorder Pro
           </a>
-          <a className="btn ghost" href={`${API}/systems/${props.sys.id}/talkgroups.csv${q}`} download={`${props.sys.id}-talkgroups.csv`}>
-            Talkgroups only (CSV)
-          </a>
+          {!licensed && (
+            <a className="btn ghost" href={`${API}/systems/${props.sys.id}/talkgroups.csv${q}`} download={`${props.sys.id}-talkgroups.csv`}>
+              Talkgroups only (CSV)
+            </a>
+          )}
         </div>
         <span className="muted small">In Trunk Recorder Pro: Setup → Systems → Import… and choose the file.</span>
       </div>

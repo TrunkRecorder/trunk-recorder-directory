@@ -7,6 +7,7 @@ import { type Db, type Row, first, marks } from "./db.ts";
 import { distanceKm } from "./geo.ts";
 import { licensedKind, TYPES, type LicensedKind } from "./kinds.ts";
 import { resolve } from "./share.ts";
+import { BASE } from "./stations.ts";
 
 export { licensedKind, licensedShown, TYPES, type LicensedKind } from "./kinds.ts";
 
@@ -213,17 +214,18 @@ export interface Licensed {
 
 /**
  * Every trunked system licensed in the US, for the map's "licensed, not shared
- * yet" layer: base and repeater stations of the FCC's trunked radio services
- * (and centralized trunk relays, FB8, of any), one per call sign and spot.
+ * yet" layer: active base and repeater stations (stations.ts) of the FCC's
+ * trunked radio services (and centralized trunk relays, FB8, of any), one per
+ * call sign and spot, as a system known only by its license has its sites.
  * Read once per FCC refresh (scripts/licensed.ts writes it as the site's
  * files, by 1° cell), never per visit.
  */
 export async function licensedSpots(fcc: Db): Promise<Licensed[]> {
   const rows = await fcc.all<Row>(
-    `SELECT t.call_sign, MAX(t.licensee_name) AS licensee, MAX(rs.description) AS service_desc, ROUND(t.lat, 4) AS lat, ROUND(t.lon, 4) AS lon, MAX(t.class_station_code) AS class, COUNT(*) AS n,
+    `SELECT t.call_sign, MAX(t.licensee_name) AS licensee, MAX(rs.description) AS service_desc, ROUND(t.lat, 4) AS lat, ROUND(t.lon, 4) AS lon, MAX(t.class_station_code) AS class, COUNT(DISTINCT t.freq_center_hz) AS n,
             GROUP_CONCAT(COALESCE(t.emissions, t.emission_designator, ''), ';') AS emissions
        FROM transmitter t LEFT JOIN radio_service rs ON rs.code = t.radio_service_code
-      WHERE t.class_station_code LIKE 'FB%' AND (rs.description LIKE '%Trunked%' OR t.class_station_code LIKE 'FB8%')
+      WHERE ${BASE} AND (rs.description LIKE '%Trunked%' OR t.class_station_code LIKE 'FB8%')
       GROUP BY t.call_sign, ROUND(t.lat, 4), ROUND(t.lon, 4)`,
   );
   return rows.map((r) => ({
@@ -235,13 +237,18 @@ export async function licensedSpots(fcc: Db): Promise<Licensed[]> {
 /** A licensed spot's file: its 1° cell ("38_-78": the floor of its latitude and longitude). */
 export const licensedCell = (lat: number, lon: number) => `${Math.floor(lat)}_${Math.floor(lon)}`;
 
+/** Each active shared system's call signs: its towers' and its licenses'. */
+const SHARED_CALL_SIGNS = `SELECT x.call_sign AS c, y.id AS system FROM site_transmitters x JOIN sites s ON s.id = x.site_id JOIN systems y ON y.id = s.system_id WHERE y.status = 'active'
+  UNION SELECT l.call_sign, y.id FROM fcc_licenses l JOIN systems y ON y.id = l.system_id WHERE y.status = 'active'`;
+
 /** The call signs shared systems have (theirs are left off the licensed layer). */
 export async function sharedCallSigns(db: Db): Promise<string[]> {
-  const rows = await db.all<{ c: string }>(
-    `SELECT DISTINCT x.call_sign AS c FROM site_transmitters x JOIN sites s ON s.id = x.site_id JOIN systems y ON y.id = s.system_id WHERE y.status = 'active'
-     UNION SELECT l.call_sign FROM fcc_licenses l JOIN systems y ON y.id = l.system_id WHERE y.status = 'active'`,
-  );
-  return rows.map((r) => r.c).sort();
+  return (await db.all<{ c: string }>(`SELECT DISTINCT c FROM (${SHARED_CALL_SIGNS}) ORDER BY c`)).map((r) => r.c);
+}
+
+/** The shared system with call sign `callSign` (null: none). */
+export async function sharedSystemOf(db: Db, callSign: string): Promise<string | null> {
+  return (await first<{ system: string }>(db, `SELECT system FROM (${SHARED_CALL_SIGNS}) WHERE c = ? LIMIT 1`, [callSign]))?.system ?? null;
 }
 
 export interface NearSystem extends SystemSummary {
@@ -341,22 +348,51 @@ export async function placesNamed(db: Db, q: string, limit = 10): Promise<PlaceH
 }
 
 /** Where a system is: its sites' licensed transmitters (and the places they're in), and how placing each site went. */
-export async function where(db: Db, systemId: string) {
+/** A transmitter of a site, where it is: its state, county and city (Census GEOIDs). */
+export interface PlacedTransmitter {
+  site: string;
+  callSign: string;
+  licensee: string;
+  lat: number;
+  lon: number;
+  heightM: number | null;
+  erpW: number | null;
+  freqHz: number | null;
+  state: string;
+  county: string;
+  place: string;
+}
+
+/** Where a system is: its sites' transmitters, with their counties' and cities' names, and how each site was placed. */
+export interface Where {
+  transmitters: (PlacedTransmitter & { countyName: string; placeName: string })[];
+  placements: { site: string; method: string; note: string; at: number }[];
+}
+
+/** Transmitters with the names of their counties and cities. */
+export async function named(db: Db, tx: PlacedTransmitter[]): Promise<Where["transmitters"]> {
+  const geoids = [...new Set(tx.flatMap((t) => [t.county, t.place]).filter(Boolean))];
+  const names = new Map(geoids.length ? (await db.all<{ geoid: string; full_name: string }>(`SELECT geoid, full_name FROM places WHERE geoid IN (${marks(geoids.length)})`, geoids)).map((p) => [p.geoid, p.full_name]) : []);
+  return tx.map((t) => ({ ...t, countyName: names.get(t.county) ?? "", placeName: names.get(t.place) ?? "" }));
+}
+
+export async function where(db: Db, systemId: string): Promise<Where> {
   const tx = await db.all<Row>(
-    `SELECT x.site_id, x.call_sign, x.licensee, x.lat, x.lon, x.height_m, x.erp_w, x.freq_hz, x.state, x.county, x.place,
-            c.full_name AS county_name, p.full_name AS place_name
+    `SELECT x.site_id, x.call_sign, x.licensee, x.lat, x.lon, x.height_m, x.erp_w, x.freq_hz, x.state, x.county, x.place
        FROM site_transmitters x JOIN sites s ON s.id = x.site_id
-       LEFT JOIN places c ON c.geoid = x.county LEFT JOIN places p ON p.geoid = x.place
       WHERE s.system_id = ? AND s.status IN ('heard', 'announced') ORDER BY x.site_id, x.lat`,
     [systemId],
   );
   const placements = await db.all<Row>("SELECT p.site_id, p.method, p.note, p.at FROM placements p JOIN sites s ON s.id = p.site_id WHERE s.system_id = ?", [systemId]);
   return {
-    transmitters: tx.map((t) => ({
-      site: t.site_id as string, callSign: t.call_sign as string, licensee: t.licensee as string, lat: t.lat as number, lon: t.lon as number,
-      heightM: t.height_m as number | null, erpW: t.erp_w as number | null, freqHz: t.freq_hz as number | null,
-      state: t.state as string, county: t.county as string, countyName: (t.county_name as string) ?? "", place: t.place as string, placeName: (t.place_name as string) ?? "",
-    })),
+    transmitters: await named(
+      db,
+      tx.map((t) => ({
+        site: t.site_id as string, callSign: t.call_sign as string, licensee: t.licensee as string, lat: t.lat as number, lon: t.lon as number,
+        heightM: t.height_m as number | null, erpW: t.erp_w as number | null, freqHz: t.freq_hz as number | null,
+        state: t.state as string, county: t.county as string, place: t.place as string,
+      })),
+    ),
     placements: placements.map((p) => ({ site: p.site_id as string, method: p.method as string, note: p.note as string, at: p.at as number })),
   };
 }

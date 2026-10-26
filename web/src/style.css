@@ -91,7 +91,7 @@ tr.dim td { opacity: 0.7; }
 .modal-back { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 16px; background: color-mix(in srgb, var(--bg) 80%, transparent); }
 .modal { width: min(560px, 100%); max-height: 100%; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
 fieldset { border: 0; margin: 0; padding: 0; }
-.modal input { flex: 1; min-width: 200px; }
+.modal input:not([type="checkbox"]):not([type="radio"]) { flex: 1; min-width: 200px; }
 
 /* Kinds of system: a filter of chips, and a badge. */
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }

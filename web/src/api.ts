@@ -2,37 +2,10 @@
 
 export const API = "/directory/api/v1";
 
-export interface SiteView {
-  id: string;
-  name: string;
-  rfss: number | null;
-  site: number | null;
-  nac: number | null;
-  status: "heard" | "announced" | "merged" | "retired";
-  modulation: string;
-  controlChannelsHz: number[];
-  voiceChannelsHz: number[];
-  neighbours: string[];
-  firstHeard: number | null;
-  lastHeard: number | null;
-}
-
-export interface SystemView {
-  id: string;
-  rev: number;
-  type: string;
-  name: string;
-  licensee: string;
-  wacn: number | null;
-  sysId: number | null;
-  status: string;
-  mergedInto: string | null;
-  createdAt: number;
-  updatedAt: number;
-  sites: SiteView[];
-  licenses: Record<string, { callSign: string; name: string; source: string }>;
-  talkgroupCount: number;
-}
+// A system and its sites, shared or known only by its license (status "licensed"), as the server makes them.
+export type { SiteView, SystemView } from "../../src/read.ts";
+// Where a system is: its transmitters, in their counties and cities.
+export type { Where } from "../../src/explore.ts";
 
 export interface TalkgroupView {
   id: string;
@@ -125,6 +98,9 @@ export interface MapSite {
 }
 
 /** A system's name, or who holds its licenses, or that it has neither yet. */
+/** A site as it's called: its RFSS-site number, else its name. */
+export const siteLabel = (s: { rfss: number | null; site: number | null; name: string }) => (s.rfss != null ? `${s.rfss}-${s.site}` : titleCase(s.name) || "site");
+
 export const nameOf = (s: { name: string; licensee?: string }) => s.name || (s.licensee ? titleCase(s.licensee) : "Unnamed system");
 
 /** FCC licensees are in capitals: "DISTRICT OF COLUMBIA" → "District of Columbia". */

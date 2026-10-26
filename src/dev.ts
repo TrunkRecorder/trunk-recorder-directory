@@ -38,6 +38,7 @@ createServer(async (req, res) => {
         {
           db,
           adminToken: process.env.ADMIN_TOKEN,
+          fcc,
           putObservation: async (key, body) => {
             const p = join(ROOT, "observations", key);
             mkdirSync(dirname(p), { recursive: true });

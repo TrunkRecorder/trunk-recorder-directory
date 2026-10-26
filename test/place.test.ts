@@ -78,7 +78,7 @@ test("a site on no licensed frequency isn't placed, and says why; placing again 
 });
 
 test("two equally good spots far apart are ambiguous, not a guess", () => {
-  const row = (call: string, lat: number, lon: number, f: number) => ({ call_sign: call, licensee_name: call, freq_center_hz: f, lat, lon, structure_height_m: 30, power_erp_w: 100, class_station_code: "FB2", location_state: "VA" });
+  const row = (call: string, lat: number, lon: number, f: number) => ({ call_sign: call, licensee_name: call, freq_center_hz: f, lat, lon, structure_height_m: 30, power_erp_w: 100, class_station_code: "FB2", location_state: "VA", location_name: null, location_city: null, emissions: null });
   const rows = [row("WAAA111", 38.9, -77.0, 851_012_500), row("WAAA111", 38.9, -77.0, 852_012_500), row("WBBB222", 37.5, -77.4, 851_012_500), row("WBBB222", 37.5, -77.4, 852_012_500)];
   const r = choose(rows, [851_012_500], [851_012_500, 852_012_500], new Set());
   assert.equal(r.transmitters.length, 0);

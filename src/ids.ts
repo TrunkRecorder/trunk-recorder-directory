@@ -16,3 +16,13 @@ export function newId(kind: IdKind): string {
 
 /** An ID as this directory makes them (`sys_…`), or a recorder's (`r_…`). */
 export const isId = (s: string, kind: string) => new RegExp(`^${kind}_[0-9a-hjkmnp-tv-z]{6,26}$`).test(s);
+
+/**
+ * A system known only by its FCC license (licensed.ts) has its call sign for
+ * an ID: `fcc_kniq704`. Not a record of the directory's, so never merged or
+ * redirected; once someone shares it, the shared system answers for it.
+ */
+export const licensedId = (callSign: string) => `fcc_${callSign.toLowerCase()}`;
+
+/** The call sign of a licensed system's ID (`fcc_kniq704` → "KNIQ704"), or null for any other ID. */
+export const callSignOf = (id: string) => /^fcc_([0-9a-z]{3,8})$/.exec(id)?.[1].toUpperCase() ?? null;

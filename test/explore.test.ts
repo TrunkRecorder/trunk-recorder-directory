@@ -175,3 +175,46 @@ test("a system's licensee is one value, kept when it's placed: lists, search and
   assert.equal((await d.get("/search?q=metropolitan")).json.hits.find((h: any) => h.systemId === wmata).systemName, row.licensee);
   assert.equal((await d.get(`/systems/${wmata}/config`)).json.source.licensee, row.licensee);
 });
+
+test("a system known only by its license: a system like any, its sites the license's stations, its licenses their frequencies", async () => {
+  const { d } = await twoSystems();
+  const v = (await d.get("/systems/fcc_kniq704")).json;
+  assert.equal(v.id, "fcc_kniq704");
+  assert.equal(v.status, "licensed");
+  assert.match(v.licensee, /Arlington County/);
+  assert.equal(v.type, "p25", "what its emissions say it likely is");
+  assert.equal(v.talkgroupCount, 0);
+  assert.ok(v.sites.length > 1 && v.sites.every((s: any) => s.status === "licensed" && !s.controlChannelsHz.length && s.licensedHz.length > 0));
+  assert.ok(v.sites.every((s: any, i: number) => i === 0 || v.sites[i - 1].licensedHz.length >= s.licensedHz.length), "the most frequencies first");
+  const all = new Set(v.sites.flatMap((s: any) => s.licensedHz).map(String));
+  assert.deepEqual(new Set(Object.keys(v.licenses)), all);
+  assert.ok(Object.values(v.licenses).every((l: any) => l.callSign === "KNIQ704" && l.source === "lookup"));
+  // Where it is, as a shared system's: a transmitter per site, in its county.
+  const w = (await d.get("/systems/fcc_kniq704/where")).json;
+  assert.equal(w.transmitters.length, v.sites.length);
+  assert.ok(w.transmitters.some((t: any) => t.countyName === "Arlington County"), JSON.stringify(w.transmitters.map((t: any) => [t.state, t.countyName])));
+  assert.deepEqual((await d.get("/systems/fcc_kniq704/talkgroups")).json.talkgroups, []);
+  assert.deepEqual((await d.get("/systems/fcc_kniq704/history")).json.history, []);
+});
+
+test("a licensed system's bundle: no site to follow and no directory record, its licensed frequencies (of the sites chosen) as licenses", async () => {
+  const { d } = await twoSystems();
+  const v = (await d.get("/systems/fcc_kniq704")).json;
+  const b = (await d.get("/systems/fcc_kniq704/config")).json;
+  assert.equal(b.format, "trp-system");
+  assert.equal(b.source.id, "fcc_kniq704");
+  assert.deepEqual(b.system.sites, []);
+  assert.equal(b.system.directory, undefined);
+  assert.equal(Object.keys(b.system.fcc).length, Object.keys(v.licenses).length);
+  const one = v.sites.at(-1);
+  const some = (await d.get(`/systems/fcc_kniq704/config?sites=${one.id}`)).json;
+  assert.deepEqual(Object.keys(some.system.fcc).map(Number).sort(), [...one.licensedHz].sort());
+});
+
+test("a licensed system someone shares is that system; no such license, none", async () => {
+  const { d, dcfd } = await twoSystems();
+  const r = await d.get("/systems/fcc_wpxt459");
+  assert.equal(r.status, 301);
+  assert.equal(r.json.movedTo, dcfd);
+  assert.equal((await d.get("/systems/fcc_zzz999")).status, 404);
+});
