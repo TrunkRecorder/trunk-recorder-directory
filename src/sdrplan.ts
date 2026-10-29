@@ -9,6 +9,8 @@
 // The site and the directory API don't run TRP's code, so these few
 // constants are mirrored here; keep them in step.
 
+import type { SiteView } from "./read.ts";
+
 export const GUARD_HZ = 75_000;
 const EDGE_HZ = 10_000;
 const DC_CLEAR_HZ = 25_000;
@@ -48,7 +50,23 @@ export const usableHalfWidth = (rateHz: number, guardHz = GUARD_HZ) => Math.max(
 
 export interface Channel {
   hz: number;
-  kind: "control" | "voice";
+  /** "licensed": a frequency licensed at a site known only by its license (which is its control channel unknown). */
+  kind: "control" | "voice" | "licensed";
+}
+
+/** A site's channels to plan for: its control and voice channels, or the frequencies licensed there. */
+export function channelsOf(s: Pick<SiteView, "controlChannelsHz" | "voiceChannelsHz" | "licensedHz">): Channel[] {
+  return [
+    ...s.controlChannelsHz.map((hz) => ({ hz, kind: "control" as const })),
+    ...s.voiceChannelsHz.map((hz) => ({ hz, kind: "voice" as const })),
+    ...s.licensedHz.map((hz) => ({ hz, kind: "licensed" as const })),
+  ];
+}
+
+/** "3 control channels", "1 licensed frequency". */
+export function channelCount(kind: Channel["kind"], n: number): string {
+  const [one, many] = { control: ["control channel", "control channels"], voice: ["voice channel", "voice channels"], licensed: ["licensed frequency", "licensed frequencies"] }[kind];
+  return `${n} ${n === 1 ? one : many}`;
 }
 
 export interface Window {

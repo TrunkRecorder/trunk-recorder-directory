@@ -182,8 +182,9 @@ export function MapView(props: {
         cb.current.onMove?.({ center: [Math.round(c.lat * 1e4) / 1e4, Math.round(c.lng * 1e4) / 1e4], zoom: Math.round(m.getZoom() * 10) / 10 }, [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
       };
       m.on("moveend", moved);
-      // (The view it opened on, too: there's no moveend for that.)
-      m.once("load", moved);
+      // (The view it opened on, too, now: there's no moveend for that, and "load" waits for every tile, which on a
+      // view opened zoomed in (coming back to the map, a link) can be a long time or never.)
+      moved();
       m.on("click", (e: { point: import("maplibre-gl").PointLike; lngLat: { lat: number; lng: number } }) => {
         const hit = m.queryRenderedFeatures(e.point, { layers: ["sites", "licensed", "counties-fill"] }) as MapGeoJSONFeature[];
         const at: [number, number] = [e.lngLat.lat, e.lngLat.lng];

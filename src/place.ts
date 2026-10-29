@@ -18,6 +18,7 @@
 // isn't placed, and placements says why.
 
 import { type Db, type Row, insertRows, marks } from "./db.ts";
+import { type FccRow, rowsOf, rowsOn, spotKey } from "./stations.ts";
 import { cellOf, distanceKm, regionOf } from "./geo.ts";
 import type { Observation } from "./observation.ts";
 import type { Places } from "./places.ts";
@@ -46,21 +47,6 @@ export interface Transmitter {
   control: boolean;
 }
 
-export interface FccRow {
-  call_sign: string;
-  licensee_name: string | null;
-  freq_center_hz: number;
-  lat: number;
-  lon: number;
-  structure_height_m: number | null;
-  power_erp_w: number | null;
-  class_station_code: string | null;
-  location_state: string | null;
-}
-
-const COLS = "call_sign, licensee_name, freq_center_hz, lat, lon, structure_height_m, power_erp_w, class_station_code, location_state";
-// (`+`: never by a status index; on D1, with no statistics, one read the whole table.)
-const BASE = "class_station_code LIKE 'FB%' AND +license_status = 'A'";
 
 /**
  * The licensed spots that are a site's transmitters: from these FCC rows, each
@@ -75,7 +61,7 @@ export function choose(rows: FccRow[], control: number[], all: number[], known: 
   for (const r of rows) {
     const f = which(r.freq_center_hz, all);
     if (f === undefined) continue;
-    const key = `${r.lat.toFixed(4)}|${r.lon.toFixed(4)}`;
+    const key = spotKey(r.lat, r.lon);
     let s = spots.get(key);
     if (!s) {
       s = { callSign: r.call_sign, licensee: r.licensee_name ?? "", lat: r.lat, lon: r.lon, heightM: null, erpW: null, freqHz: 0, stationClass: r.class_station_code ?? "", score: 0, control: false, state: r.location_state ?? "", freqs: new Set(), calls: new Map() };
@@ -106,12 +92,6 @@ export function choose(rows: FccRow[], control: number[], all: number[], known: 
   return { transmitters: mine.map(({ freqs: _f, calls: _c, mineToo: _m, ...t }) => t), note: "" };
 }
 
-/** The licensed transmitters of call signs `callSigns` (bases and repeaters): fetched once for a system's sites. */
-export async function rowsOf(fcc: Db, callSigns: string[]): Promise<FccRow[]> {
-  const some = [...new Set(callSigns)].slice(0, 50);
-  return some.length ? fcc.all<FccRow>(`SELECT ${COLS} FROM transmitter WHERE call_sign IN (${marks(some.length)}) AND ${BASE}`, some) : [];
-}
-
 /**
  * A site's transmitters: the licensed spots on its frequencies (`control`
  * its control channels, `all` every frequency it uses), by the system's call
@@ -121,7 +101,7 @@ export async function rowsOf(fcc: Db, callSigns: string[]): Promise<FccRow[]> {
  */
 export async function locate(fcc: Db, control: number[], all: number[], byCall: FccRow[], callSigns: string[]): Promise<ReturnType<typeof choose>> {
   const rows = byCall.slice();
-  for (const f of all.slice(0, MAX_FREQS)) rows.push(...(await fcc.all<FccRow>(`SELECT ${COLS} FROM transmitter WHERE freq_center_hz BETWEEN ? AND ? AND ${BASE}`, [f - HALF_CHANNEL, f + HALF_CHANNEL])));
+  for (const f of all.slice(0, MAX_FREQS)) rows.push(...(await rowsOn(fcc, f, HALF_CHANNEL)));
   return choose(rows, control, all, new Set(callSigns));
 }
 

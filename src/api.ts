@@ -10,8 +10,10 @@ import { newId } from "./ids.ts";
 import { keeper, mergeSystems } from "./merge.ts";
 import { NameIndex } from "./names.ts";
 import { Invalid, parseObservation, type Observation } from "./observation.ts";
-import { changeset, diff, getSystem, getTalkgroups, history, search, talkgroupsCsv, trpSystem } from "./read.ts";
-import { city, county, countyCounts, mapSites, nearby, parseTypes, placesNamed, sharedCallSigns, state, states, where } from "./explore.ts";
+import { changeset, diff, getSystem, getTalkgroups, history, search, talkgroupsCsv, trpBundle } from "./read.ts";
+import { city, county, countyCounts, mapSites, nearby, parseTypes, placesNamed, sharedCallSigns, sharedSystemOf, state, states, where } from "./explore.ts";
+import { callSignOf } from "./ids.ts";
+import { licensedSystem } from "./licensed.ts";
 import { shareTowers } from "./place.ts";
 import { placeJoining } from "./twins.ts";
 import type { Places } from "./places.ts";
@@ -44,12 +46,56 @@ export function json(body: unknown, status = 200, headers: Record<string, string
 }
 const err = (status: number, message: string) => json({ error: message }, status);
 
-/** A merged system's old ID answers with where it went (TRP relinks). */
-async function systemOr301(env: Env, id: string, url: URL): Promise<string | Response> {
-  const now = await resolve(env.db, id);
-  if (now === id) return id;
-  const to = url.pathname.replace(id, now) + url.search;
-  return json({ movedTo: now }, 301, { location: to });
+/**
+ * The systems routes read: shared ones, and ones known only by their license
+ * (licensed.ts, fcc_<call sign>), alike. A licensed system has no talkgroups
+ * or history; once someone shares it, the shared system answers for it.
+ */
+class Systems {
+  private env: Env;
+  private licensed = new Map<string, ReturnType<typeof licensedSystem>>();
+  constructor(env: Env) {
+    this.env = env;
+  }
+
+  private license(id: string) {
+    const call = callSignOf(id);
+    if (!call || !this.env.fcc) return null;
+    if (!this.licensed.has(id)) this.licensed.set(id, licensedSystem(this.env.db, this.env.fcc, this.env.places, call));
+    return this.licensed.get(id)!;
+  }
+
+  /** The system an ID names now: a merged one's, the one it went into; a license someone shares, that system. */
+  async resolve(id: string): Promise<string> {
+    const call = callSignOf(id);
+    return call ? ((await sharedSystemOf(this.env.db, call)) ?? id) : resolve(this.env.db, id);
+  }
+
+  /** The ID to read, or the answer instead: where a system went (TRP relinks). */
+  async idOr301(id: string, url: URL): Promise<string | Response> {
+    const now = await this.resolve(id);
+    if (now === id) return id;
+    return json({ movedTo: now }, 301, { location: url.pathname.replace(id, now) + url.search });
+  }
+
+  async view(id: string, rev?: number) {
+    const l = this.license(id);
+    return l ? ((await l)?.system ?? null) : getSystem(this.env.db, id, rev);
+  }
+
+  async talkgroups(id: string, opts: Parameters<typeof getTalkgroups>[2] = {}) {
+    const l = this.license(id);
+    return l ? ((await l) ? [] : null) : getTalkgroups(this.env.db, id, opts);
+  }
+
+  async where(id: string) {
+    const l = this.license(id);
+    return l ? ((await l)?.where ?? { transmitters: [], placements: [] }) : where(this.env.db, id);
+  }
+
+  async history(id: string, before?: number) {
+    return callSignOf(id) ? [] : history(this.env.db, id, { before });
+  }
 }
 
 export function isAdmin(env: Pick<Env, "adminToken">, req: Request): boolean {
@@ -81,54 +127,48 @@ export async function handle(env: Env, req: Request): Promise<Response> {
   const path = url.pathname.slice(BASE.length) || "/";
   const q = url.searchParams;
   const db = env.db;
+  const systems = new Systems(env);
   const m = (re: RegExp) => re.exec(path);
   try {
     if (req.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "content-type, authorization", "access-control-allow-methods": "GET, POST, DELETE, OPTIONS" } });
     }
     if (req.method === "GET") {
-      let r = m(/^\/systems\/(sys_[0-9a-z]+)$/);
+      // (A system's ID: shared, sys_…; or known only by its license, fcc_….)
+      let r = m(/^\/systems\/((?:sys|fcc)_[0-9a-z]+)$/);
       if (r) {
-        const id = await systemOr301(env, r[1], url);
+        const id = await systems.idOr301(r[1], url);
         if (typeof id !== "string") return id;
-        const s = await getSystem(db, id, num(q.get("rev")));
+        const s = await systems.view(id, num(q.get("rev")));
         if (!s || s.status === "hidden") return err(404, "no such system");
         return json(s, 200, { etag: `"${s.id}.${s.rev}"` });
       }
-      r = m(/^\/systems\/(sys_[0-9a-z]+)\/talkgroups(\.csv)?$/);
+      r = m(/^\/systems\/((?:sys|fcc)_[0-9a-z]+)\/talkgroups(\.csv)?$/);
       if (r) {
-        const id = await systemOr301(env, r[1], url);
+        const id = await systems.idOr301(r[1], url);
         if (typeof id !== "string") return id;
         const sites = q.get("sites")?.split(",").filter(Boolean);
-        const tgs = await getTalkgroups(db, id, { rev: num(q.get("rev")), sites });
+        const tgs = await systems.talkgroups(id, { rev: num(q.get("rev")), sites });
         if (!tgs) return err(404, "no such system");
         if (r[2]) return new Response(talkgroupsCsv(tgs), { headers: { "content-type": "text/csv; charset=utf-8", "access-control-allow-origin": "*" } });
         return json({ talkgroups: tgs });
       }
-      r = m(/^\/systems\/(sys_[0-9a-z]+)\/config$/);
+      r = m(/^\/systems\/((?:sys|fcc)_[0-9a-z]+)\/config$/);
       if (r) {
-        const id = await systemOr301(env, r[1], url);
+        const id = await systems.idOr301(r[1], url);
         if (typeof id !== "string") return id;
-        const s = await getSystem(db, id);
+        const s = await systems.view(id);
         if (!s || s.status === "hidden") return err(404, "no such system");
         const sites = q.get("sites")?.split(",").filter(Boolean);
         // Named talkgroups only (a recorder hears the rest itself, soon enough).
-        const tgs = (await getTalkgroups(db, id, { sites }))!.filter((t) => t.alpha || q.get("all") === "1");
-        // A system for Trunk Recorder Pro (format trp-system, v1): its config, its talkgroup file, and where it came from.
-        const licensee = (await first<{ licensee: string }>(db, "SELECT licensee FROM systems WHERE id = ?", [id]))?.licensee ?? "";
-        const bundle = {
-          format: "trp-system", v: 1,
-          source: { directory: `${url.origin}/directory`, id: s.id, rev: s.rev, url: `${url.origin}/directory/systems/${s.id}`, ...(licensee ? { licensee } : {}) },
-          system: trpSystem(s, sites, licensee),
-          talkgroupsCsv: talkgroupsCsv(tgs),
-        };
-        const name = `${(s.name || licensee || s.id).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || s.id}.trp-system.json`;
+        const tgs = (await systems.talkgroups(id, { sites }))!.filter((t) => t.alpha || q.get("all") === "1");
+        const { bundle, name } = trpBundle(s, url.origin, sites, tgs);
         return json(bundle, 200, { etag: `"${s.id}.${s.rev}"`, ...(q.get("download") === "1" ? { "content-disposition": `attachment; filename="${name}"` } : {}) });
       }
-      r = m(/^\/systems\/(sys_[0-9a-z]+)\/where$/);
-      if (r) return json(await where(db, await resolve(db, r[1])));
-      r = m(/^\/systems\/(sys_[0-9a-z]+)\/history$/);
-      if (r) return json({ history: await history(db, await resolve(db, r[1]), { before: num(q.get("before")) }) });
+      r = m(/^\/systems\/((?:sys|fcc)_[0-9a-z]+)\/where$/);
+      if (r) return json(await systems.where(await systems.resolve(r[1])));
+      r = m(/^\/systems\/((?:sys|fcc)_[0-9a-z]+)\/history$/);
+      if (r) return json({ history: await systems.history(await systems.resolve(r[1]), num(q.get("before"))) });
       r = m(/^\/systems\/(sys_[0-9a-z]+)\/diff$/);
       if (r) {
         const from = num(q.get("from"));

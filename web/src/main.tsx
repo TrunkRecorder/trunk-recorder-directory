@@ -52,7 +52,7 @@ function App() {
   let page: React.ReactNode;
   let m: RegExpExecArray | null;
   let wide = false;
-  if ((m = /^\/systems\/(sys_[0-9a-z]+)(?:\/(talkgroups|sites|licenses|history|sdrs))?$/.exec(path))) page = <SystemPage id={m[1]} tab={(m[2] as never) ?? "sites"} query={query} />;
+  if ((m = /^\/systems\/((?:sys|fcc)_[0-9a-z]+)(?:\/(talkgroups|sites|licenses|history|sdrs))?$/.exec(path))) page = <SystemPage id={m[1]} tab={(m[2] as never) ?? "sites"} query={query} />;
   else if ((m = /^\/changesets\/(cs_[0-9a-z]+)$/.exec(path))) page = <ChangesetPage id={m[1]} />;
   // (The map was /map: it's the home page now, its links still work.)
   else if (path === "/map") page = <Redirect to={`/${location.search}`} />;

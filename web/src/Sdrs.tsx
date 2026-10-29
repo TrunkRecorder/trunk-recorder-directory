@@ -6,21 +6,21 @@
 // of each device's span over the channels it holds, and a table of each.
 
 import { useMemo, useState } from "react";
-import { counts, DEVICES, optimize, planSdrs, ratesOf, type Channel, type Window } from "../../src/sdrplan.ts";
-import { mhz, type SystemView } from "./api.ts";
+import { channelCount, channelsOf, counts, DEVICES, optimize, planSdrs, ratesOf, type Channel, type Window } from "../../src/sdrplan.ts";
+import { mhz, siteLabel, type SystemView } from "./api.ts";
 
 /** Each device's colour, by its place in the plan. */
 const COLORS = ["#2f7ff5", "#e08a1e", "#1f9e74", "#d2457a", "#8e5bd6", "#c2a400", "#0fa3b1", "#e4572e"];
 export const sdrColor = (i: number) => COLORS[i % COLORS.length];
 
 const msps = (r: number) => `${(r / 1e6).toLocaleString(undefined, { maximumFractionDigits: 3 })} MS/s`;
-const siteName = (s: SystemView["sites"][number]) => (s.rfss != null ? `${s.rfss}-${s.site}` : s.name || "site");
 /** Frequency ranges this far apart are drawn apart (700 and 800 MHz in one system). */
 const BAND_GAP_HZ = 20e6;
 
 export function SdrPlanner(props: { sys: SystemView }) {
-  const heard = props.sys.sites.filter((s) => s.status === "heard" && s.controlChannelsHz.length);
-  const choosable = heard.length ? heard : props.sys.sites.filter((s) => s.controlChannelsHz.length);
+  const planned = props.sys.sites.filter((s) => channelsOf(s).length);
+  const heard = planned.filter((s) => s.status === "heard");
+  const choosable = heard.length ? heard : planned;
   const [sites, setSites] = useState<string[]>(() => choosable.slice(0, 1).map((s) => s.id));
   const [deviceKey, setDeviceKey] = useState("rtlsdr");
   const device = DEVICES.find((d) => d.key === deviceKey) ?? DEVICES[0];
@@ -34,15 +34,17 @@ export function SdrPlanner(props: { sys: SystemView }) {
     () =>
       props.sys.sites
         .filter((s) => sites.includes(s.id))
-        .flatMap((s) => [...s.controlChannelsHz.map((hz) => ({ hz, kind: "control" as const })), ...s.voiceChannelsHz.map((hz) => ({ hz, kind: "voice" as const }))]),
+        .flatMap(channelsOf),
     [props.sys, sites],
   );
   const plan = useMemo(() => (rate ? planSdrs(channels, device, rate) : optimize(channels, device, { stretch })), [channels, device, rate, stretch]);
   const others = useMemo(() => counts(channels, stretch), [channels, stretch]);
   const used = [...new Set(plan.windows.map((w) => w.rateHz))].sort((a, b) => a - b);
-  const voice = new Set(channels.filter((c) => c.kind === "voice").map((c) => c.hz)).size;
+  const ofKind = (k: Channel["kind"]) => new Set(channels.filter((c) => c.kind === k).map((c) => c.hz)).size;
+  const voice = ofKind("voice");
+  const held = (["control", "voice", "licensed"] as const).filter((k) => ofKind(k) || (k === "voice" && ofKind("control"))).map((k) => channelCount(k, ofKind(k)));
 
-  if (!choosable.length) return <p className="muted">No control channels known yet, so there's nothing to plan.</p>;
+  if (!choosable.length) return <p className="muted">No channels known yet, so there's nothing to plan.</p>;
   return (
     <div className="stack sdr-plan">
       <p className="muted small">
@@ -85,7 +87,7 @@ export function SdrPlanner(props: { sys: SystemView }) {
               {choosable.map((s) => (
                 <label key={s.id} className={`chip${sites.includes(s.id) ? " on" : ""}`}>
                   <input type="checkbox" checked={sites.includes(s.id)} onChange={(e) => setSites(e.target.checked ? [...sites, s.id] : sites.filter((x) => x !== s.id))} />
-                  {siteName(s)} <span className="muted mono">{s.controlChannelsHz.map(mhz).slice(0, 2).join(", ")}</span>
+                  {siteLabel(s)} <span className="muted mono">{s.controlChannelsHz.map(mhz).slice(0, 2).join(", ")}</span>
                 </label>
               ))}
             </div>
@@ -103,8 +105,9 @@ export function SdrPlanner(props: { sys: SystemView }) {
             </b>
             <span className="muted">
               at {used.map(msps).join(" and ")}
-              {!rate && used.length > 0 && ` (the lowest that holds ${plan.windows.length === 1 ? "its" : "each one's"} channels)`} for {new Set(channels.filter((c) => c.kind === "control").map((c) => c.hz)).size} control and {voice} voice channel{voice === 1 ? "" : "s"}
-              {voice === 0 && " (no voice channels heard yet: the plan covers the control channels)"}
+              {!rate && used.length > 0 && ` (the lowest that holds ${plan.windows.length === 1 ? "its" : "each one's"} channels)`} for {held.join(" and ")}
+              {voice === 0 && ofKind("control") > 0 && " (no voice channels heard yet: the plan covers the control channels)"}
+              {ofKind("licensed") > 0 && " (which is its control channel isn't known yet: the plan covers every frequency licensed)"}
             </span>
           </div>
           {plan.outOfRange.length > 0 && (
@@ -225,7 +228,7 @@ function Band(props: { windows: [Window, number][]; lo: number; hi: number }) {
         {props.windows.flatMap(([w, i]) =>
           w.channels.map((ch) => (
             <g key={`${i}-${ch.hz}`}>
-              <title>{`${mhz(ch.hz)} MHz, ${ch.kind === "control" ? "control channel" : "voice channel"}, on SDR ${i + 1}`}</title>
+              <title>{`${mhz(ch.hz)} MHz, ${channelCount(ch.kind, 1).replace(/^1 /, "")}, on SDR ${i + 1}`}</title>
               <line x1={x(ch.hz)} x2={x(ch.hz)} y1={axisY + (ch.kind === "control" ? 0 : 8)} y2={axisY + 18} stroke={sdrColor(i)} strokeWidth={ch.kind === "control" ? 3 : 2} />
               {ch.kind === "control" && <circle cx={x(ch.hz)} cy={axisY} r={4} fill={sdrColor(i)} />}
             </g>
@@ -233,7 +236,19 @@ function Band(props: { windows: [Window, number][]; lo: number; hi: number }) {
         )}
       </svg>
       <figcaption className="muted small">
-        <span className="legend-dot" /> control channel · <span className="legend-tick" /> voice channel · faint: the device's whole span · solid: what it records well
+        {(() => {
+          const kinds = new Set(props.windows.flatMap(([w]) => w.channels.map((c) => c.kind)));
+          return (
+            <>
+              {kinds.has("control") && (
+                <>
+                  <span className="legend-dot" /> control channel ·{" "}
+                </>
+              )}
+              <span className="legend-tick" /> {kinds.has("licensed") ? "licensed frequency" : "voice channel"} · faint: the device's whole span · solid: what it records well
+            </>
+          );
+        })()}
       </figcaption>
     </figure>
   );

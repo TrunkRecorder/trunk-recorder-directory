@@ -1,5 +1,7 @@
 // Reading the directory: a system as it is (or was, at any version), its
-// talkgroups, search, history. (What's near a place: explore.ts.)
+// talkgroups, search, history; and a system as Trunk Recorder Pro imports it.
+// (What's near a place: explore.ts. A system known only by its license, in
+// these same terms: licensed.ts.)
 
 import { type Db, type Row, first, marks } from "./db.ts";
 import { resolve } from "./share.ts";
@@ -17,6 +19,8 @@ export interface SiteView {
   lon: number | null;
   controlChannelsHz: number[];
   voiceChannelsHz: number[];
+  /** A site known only by its license (status "licensed"): the frequencies licensed there, which of them is its control channel unknown. */
+  licensedHz: number[];
   neighbours: string[];
   firstHeard: number | null;
   lastHeard: number | null;
@@ -150,6 +154,7 @@ function systemView(recs: Records): SystemView | null {
       lon: x.lon as number | null,
       controlChannelsHz: channels(freqs, x.id as string, "control"),
       voiceChannelsHz: channels(freqs, x.id as string, "voice"),
+      licensedHz: [],
       neighbours: [...recs.get("neighbour")!.values()].filter((n) => n.site_id === x.id).map((n) => n.neighbour_id as string),
       firstHeard: x.first_heard as number | null,
       lastHeard: x.last_heard as number | null,
@@ -254,21 +259,28 @@ export function talkgroupsCsv(tgs: TalkgroupView[]): string {
   return rows.join("\n") + "\n";
 }
 
-/** A system as TRP's config has one (with its directory link), ready to add. `licensee`: who holds most of its licenses (an unnamed system's short name). */
-export function trpSystem(s: SystemView, sites?: string[], licensee = ""): Record<string, unknown> {
+/** A system's name as a file or short name: its name, else who holds its licenses ("district-of-columbia"), else its ID. */
+const slugOf = (s: SystemView, max: number) => (s.name || s.licensee || s.id).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, max).replace(/-+$/, "") || s.id;
+
+/**
+ * A system as TRP's config has one (with its directory link), ready to add:
+ * these sites of it (`sites`: all but retired ones). A site known only by its
+ * license has no control channel to follow: its licensed frequencies come as
+ * the system's licenses, which Trunk Recorder Pro's survey finds it by.
+ */
+export function trpSystem(s: SystemView, sites?: string[]): Record<string, unknown> {
   const pick = sites?.length ? s.sites.filter((x) => sites.includes(x.id)) : s.sites.filter((x) => x.status !== "retired");
-  // Its short name: from its name, else who holds its licenses ("district-of-columbia"), else its ID.
-  const slug = (s.name || licensee || s.id).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24).replace(/-+$/, "") || "system";
+  const licensed = new Set(pick.flatMap((x) => x.licensedHz).map(String));
+  const licenses = Object.entries(s.licenses).filter(([k]) => s.status !== "licensed" || licensed.has(k));
   return {
-    shortName: slug,
+    shortName: slugOf(s, 24),
     ...(s.name ? { name: s.name } : {}),
     type: s.type,
     enabled: true,
-    ...(Object.keys(s.licenses).length
-      ? { fcc: Object.fromEntries(Object.entries(s.licenses).map(([k, l]) => [k, { callSign: l.callSign, ...(l.name ? { name: l.name } : {}), from: l.source === "user" ? "lookup" : l.source }])) }
-      : {}),
-    directory: { id: s.id, rev: s.rev },
-    sites: pick.map((x) => ({
+    ...(licenses.length ? { fcc: Object.fromEntries(licenses.map(([k, l]) => [k, { callSign: l.callSign, ...(l.name ? { name: l.name } : {}), from: l.source === "user" ? "lookup" : l.source }])) } : {}),
+    // (Not a record of the directory's to share to, known only by its license.)
+    ...(s.status !== "licensed" ? { directory: { id: s.id, rev: s.rev } } : {}),
+    sites: pick.filter((x) => x.controlChannelsHz.length).map((x) => ({
       ...(x.name ? { name: x.name } : {}),
       enabled: true,
       controlChannelsHz: x.controlChannelsHz,
@@ -284,6 +296,19 @@ export function trpSystem(s: SystemView, sites?: string[], licensee = ""): Recor
       ...(x.bandplan && typeof x.bandplan === "object" ? (x.bandplan as object) : {}),
       directoryId: x.id,
     })),
+  };
+}
+
+/** A system for Trunk Recorder Pro (format trp-system, v1): its config (these sites), its talkgroup file, where it came from; and its file's name. */
+export function trpBundle(s: SystemView, origin: string, sites: string[] | undefined, tgs: TalkgroupView[]) {
+  return {
+    name: `${slugOf(s, 40)}.trp-system.json`,
+    bundle: {
+      format: "trp-system", v: 1,
+      source: { directory: `${origin}/directory`, id: s.id, rev: s.rev, url: `${origin}/directory/systems/${s.id}`, ...(s.licensee ? { licensee: s.licensee } : {}) },
+      system: trpSystem(s, sites),
+      talkgroupsCsv: talkgroupsCsv(tgs),
+    },
   };
 }
 
