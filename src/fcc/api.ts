@@ -9,6 +9,7 @@
 // Requests carry the user's location: nothing here logs or keeps a body.
 
 import type { Db } from "../db.ts";
+import { unsited } from "../stations.ts";
 import { lookupTransmitters, type TransmitterHit } from "./query.ts";
 
 export const FCC_BASE = "/api/v1/fcc";
@@ -170,6 +171,15 @@ async function callSigns(db: Db, request: Request): Promise<Response> {
       GROUP BY t.call_sign`,
     calls,
   );
+  // A license with no station listed (a state's statewide one) has no
+  // transmitter row: its holder, with the state of its address.
+  const found = new Set(rows.map((r) => r.call_sign));
+  const rest = calls.filter((c) => !found.has(c));
+  if (rest.length) {
+    for (const u of await unsited(db, `u.call_sign IN (${rest.map(() => "?").join(", ")})`, rest)) {
+      rows.push({ call_sign: u.call_sign, licensee_name: u.licensee_name, radio_service_code: u.radio_service_code, radio_service_desc: u.radio_service_desc, license_status: "A", location_city: u.licensee_city, location_state: u.licensee_state });
+    }
+  }
   return json({
     v: 1,
     results: rows.map((r) => ({

@@ -113,6 +113,7 @@ and is rate-limited. Stewards' and admins' actions need `ADMIN_TOKEN` (bearer) u
 | `GET /map/sites`, `GET /map/counties` | Every placed site with its transmitters; each county's count of systems |
 | `GET /map/callsigns` | The call signs shared systems have (the map leaves them off its licensed layer, which is the site's files: `/directory/geo/licensed/`) |
 | `GET /nearby?lat=&lon=[&coarse=1]&radiusKm=` | Systems with a transmitter in range, nearest first, with their transmitters (power, height, frequency). The point isn't stored. |
+| `GET /statewide?state=MO` or `?lat=&lon=` | A state's statewide systems (the one a point is in; the point isn't stored): its State Licenses, which list no sites, each as the shared system that sends its call sign, or as the license (`fcc_<call sign>`) |
 | `GET /identify?claim=p25:bee00.3a9/1.5` | What an identity heard on the air is |
 | `POST /observations` | A share from TRP (`src/observation.ts`) |
 | `POST /changesets/{id}/revert`, `POST /systems/{id}/revert {to}`, `POST /actors/{id}/revert` | Revert (token) |

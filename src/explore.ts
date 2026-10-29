@@ -1,13 +1,16 @@
 // Exploring the directory: by place (state → county → city), on a map, near a
-// point, and the licensed trunked systems no one has shared yet. Sites are
+// point, the licensed trunked systems no one has shared yet, and a state's
+// statewide systems (licensed statewide, with no sites listed). Sites are
 // where their FCC-licensed transmitters are (place.ts): a system is in every
 // county and city one of its transmitters is in.
 
 import { type Db, type Row, first, marks } from "./db.ts";
 import { distanceKm } from "./geo.ts";
-import { licensedKind, TYPES, type LicensedKind } from "./kinds.ts";
+import { licensedId } from "./ids.ts";
+import { licensedKind, licensedShown, TYPES, type LicensedKind } from "./kinds.ts";
 import { resolve } from "./share.ts";
-import { BASE } from "./stations.ts";
+import type { Places } from "./places.ts";
+import { BASE, unsited } from "./stations.ts";
 
 export { licensedKind, licensedShown, TYPES, type LicensedKind } from "./kinds.ts";
 
@@ -395,4 +398,61 @@ export async function where(db: Db, systemId: string): Promise<Where> {
     ),
     placements: placements.map((p) => ({ site: p.site_id as string, method: p.method as string, note: p.note as string, at: p.at as number })),
   };
+}
+
+/** A state's own license, licensed statewide with no sites listed: the 700 MHz State License. */
+const STATE_LICENSE = "SL";
+
+export interface StatewideSystem {
+  /** The shared system with the license, or the license's own (fcc_<call sign>) when no one has shared it. */
+  id: string;
+  name: string;
+  /** Its type (shared), or "" (by its license, which lists no emissions). */
+  type: string;
+  licensee: string;
+  callSigns: string[];
+  serviceDesc: string;
+  shared: boolean;
+}
+
+/**
+ * The state a point is in (USPS code): of the states of the counties nearest
+ * it, the first whose boundaries hold it. Null outside every state (at sea).
+ */
+export async function stateAt(db: Db, places: Places, lat: number, lon: number): Promise<string | null> {
+  const rows = await db.all<{ state: string; lat: number; lon: number }>(
+    "SELECT state, lat, lon FROM places WHERE kind = 'county' AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?",
+    [lat - 1, lat + 1, lon - 1.5, lon + 1.5],
+  );
+  const d = (r: { lat: number; lon: number }) => distanceKm([lat, lon], [r.lat, r.lon]);
+  const near = [...new Set(rows.sort((a, b) => d(a) - d(b)).map((r) => r.state))];
+  for (const st of near.slice(0, 3)) if ((await places.at(st, lat, lon)).county) return st;
+  return null;
+}
+
+/**
+ * A state's statewide systems: its State Licenses (no sites listed, so the map
+ * can't place them), each as the shared system that sends its call sign on
+ * the air, or as the license when no one has shared it. Of these types (one
+ * by its license only with every type: what it is isn't licensed).
+ */
+export async function statewide(db: Db, fcc: Db, st: string, types: string[], now = Date.now()): Promise<StatewideSystem[]> {
+  const licenses = await unsited(fcc, "u.licensee_state = ? AND u.radio_service_code = ?", [st, STATE_LICENSE]);
+  const by = new Map<string, StatewideSystem>();
+  for (const u of licenses) {
+    const shared = await sharedSystemOf(db, u.call_sign);
+    const id = shared ? await resolve(db, shared) : licensedId(u.call_sign);
+    const e = by.get(id) ?? { id, name: "", type: "", licensee: u.licensee_name ?? "", callSigns: [], serviceDesc: u.radio_service_desc ?? "", shared: !!shared };
+    e.callSigns.push(u.call_sign);
+    by.set(id, e);
+  }
+  const sums = new Map((await summaries(db, [...by.values()].filter((e) => e.shared).map((e) => e.id), now)).map((s) => [s.id, s]));
+  const out: StatewideSystem[] = [];
+  for (const e of by.values()) {
+    const s = sums.get(e.id);
+    if (e.shared && !s) continue; // hidden
+    if (s) Object.assign(e, { name: s.name, type: s.type, licensee: s.licensee || e.licensee });
+    if (s ? types.includes(s.type) : licensedShown("", types)) out.push(e);
+  }
+  return out.sort((a, b) => Number(b.shared) - Number(a.shared) || (a.name || a.licensee).localeCompare(b.name || b.licensee));
 }

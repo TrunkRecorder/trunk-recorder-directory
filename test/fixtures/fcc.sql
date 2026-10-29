@@ -1,11 +1,13 @@
 -- A small FCC database for tests and offline runs: ArgusRF's schema (src/fcc/schema.sql)
 -- with real rows from an ArgusRF build (FCC data of Sun Oct 18 09:47:49 EDT 2026), made by scripts/fcc-fixture.ts:
--- DC Fire and EMS, Arlington County and WMATA licenses, and the trunked base
--- stations in central Washington. Real rows, so the same end-to-end assertions
+-- DC Fire and EMS, Arlington County and WMATA licenses, the trunked base
+-- stations in central Washington, and DC's, Maryland's, Virginia's and
+-- Missouri's State Licenses (no sites listed). Real rows, so the same end-to-end assertions
 -- hold offline, on staging and on production.
 
 -- ArgusRF's FCC ULS database (the D1 database `argus`), as its ingest builds it:
--- copied from robotastic/argusrf ingest/src/db.ts (SCHEMA + INDEXES) at faeb0c8.
+-- copied from robotastic/argusrf ingest/src/db.ts (SCHEMA + INDEXES) at faeb0c8,
+-- with unsited_license (ArgusRF's unsited-licenses branch).
 -- The FCC lookup reads it; tests and local runs build a small one from this.
 -- If ArgusRF changes its schema, copy it again (test/fcc.test.ts checks the columns the lookup reads).
 
@@ -173,6 +175,26 @@ CREATE TABLE radio_service (
   description TEXT NOT NULL
 );
 
+-- Active licenses with no site listed (no frequency at a located LO row), so
+-- no transmitter row: who holds a call sign heard on the air, though not where.
+-- ~25k (2026-10-18 data): mostly mobile-only licenses (an operating area, no
+-- coordinates), and each state's 700 MHz State License (SL, ~40), licensed
+-- statewide with no stations listed. The licensee's mailing address stands in
+-- for a location (a state license's is in its state).
+CREATE TABLE unsited_license (
+  call_sign          TEXT PRIMARY KEY,
+  source_file_id     INTEGER REFERENCES source_file(id),
+  usi                TEXT,
+  licensee_name      TEXT,
+  frn                TEXT,
+  licensee_city      TEXT,
+  licensee_state     TEXT,
+  radio_service_code TEXT,
+  license_status     TEXT,
+  grant_date         TEXT,
+  expired_date       TEXT
+);
+
 -- The money index. A frequency lookup is answered by a bounded range scan on
 -- freq_lower_hz (see shared/src/query.ts), so this ordering is what makes the
 -- whole thing work without an R-tree.
@@ -191,11 +213,14 @@ CREATE INDEX idx_tx_latlon ON transmitter(lat, lon);
 -- ever reached by frequency, never browsed.
 CREATE INDEX idx_txi_lower ON transmitter_inactive(freq_lower_hz, freq_upper_hz);
 
+-- A state's statewide licenses (the systems directory's map lists them).
+CREATE INDEX idx_unsited_state ON unsited_license(licensee_state);
+
 INSERT INTO source_file (id, filename, url, sha256, downloaded_at, fcc_published_at, record_count) VALUES
-(1, 'l_LMpriv.zip', 'https://data.fcc.gov/download/pub/uls/complete/l_LMpriv.zip', 'bb0af59e046f39fd9c207977f5cd89301fb333a71da056eccd72ace54342b17a', '2026-10-23T11:19:35.559Z', 'Sun Oct 18 09:23:55 EDT 2026', 5714868),
-(2, 'l_LMcomm.zip', 'https://data.fcc.gov/download/pub/uls/complete/l_LMcomm.zip', '0e4198f9ad752ca1b37655fd6a67b42d54bc14eee8b37f1bf7d44b8b6ab0905b', '2026-10-23T11:20:18.134Z', 'Sun Oct 18 09:30:36 EDT 2026', 7952522),
-(3, 'l_micro.zip', 'https://data.fcc.gov/download/pub/uls/complete/l_micro.zip', 'e756a3674a3c7e258c4255d1184cce71d0a12a1f2407111b911283370a9c7c4b', '2026-10-23T11:20:38.078Z', 'Sun Oct 18 09:39:09 EDT 2026', 10990404),
-(4, 'l_paging.zip', 'https://data.fcc.gov/download/pub/uls/complete/l_paging.zip', '1ae47daf59d8de3b147af01899a6395d637b4748f6567276c8cf4dfaf704e5ce', '2026-10-23T11:20:48.800Z', 'Sun Oct 18 09:47:49 EDT 2026', 11032456);
+(1, 'l_LMpriv.zip', 'https://data.fcc.gov/download/pub/uls/complete/l_LMpriv.zip', 'bb0af59e046f39fd9c207977f5cd89301fb333a71da056eccd72ace54342b17a', '2026-10-22T22:06:29.914Z', 'Sun Oct 18 09:23:55 EDT 2026', 5714868),
+(2, 'l_LMcomm.zip', 'https://data.fcc.gov/download/pub/uls/complete/l_LMcomm.zip', '0e4198f9ad752ca1b37655fd6a67b42d54bc14eee8b37f1bf7d44b8b6ab0905b', '2026-10-22T22:07:30.844Z', 'Sun Oct 18 09:30:36 EDT 2026', 7952522),
+(3, 'l_micro.zip', 'https://data.fcc.gov/download/pub/uls/complete/l_micro.zip', 'e756a3674a3c7e258c4255d1184cce71d0a12a1f2407111b911283370a9c7c4b', '2026-10-22T22:08:20.125Z', 'Sun Oct 18 09:39:09 EDT 2026', 10990404),
+(4, 'l_paging.zip', 'https://data.fcc.gov/download/pub/uls/complete/l_paging.zip', '1ae47daf59d8de3b147af01899a6395d637b4748f6567276c8cf4dfaf704e5ce', '2026-10-22T22:08:48.523Z', 'Sun Oct 18 09:47:49 EDT 2026', 11032456);
 INSERT INTO radio_service (code, description) VALUES
 ('AA', 'Aviation Auxiliary Group'),
 ('AB', 'Aural Microwave Booster'),
@@ -1582,3 +1607,8 @@ INSERT INTO transmitter (id, source, source_file_id, usi, call_sign, location_nu
 (1657749, 'uls', 2, '5220717', 'WSKR750', 1, 1, 861337500, 861332600, 861342400, 9800, 'emission', '9K80D7W', '9K80D7W,20K0D7W,20K0F1D,20K0F3E', 150, 305, 38.950388888888895, -77.07969444444444, 'fixed', 'exact', NULL, NULL, 24, 'LTOWER', 'Belt Rd', 'Washington', 'DC', 'Washington Gas Light Company', '0016494148', 'YM', NULL, 'FB2', 'A', '06/04/2025', '06/01/2032'),
 (1657751, 'uls', 2, '5220718', 'WSKR751', 1, 1, 861362500, 861357600, 861367400, 9800, 'emission', '9K80D7W', '9K80D7W,20K0D7W,20K0F1D,20K0F3E', 150, 300, 38.8125, -77.04222222222222, 'fixed', 'exact', NULL, NULL, 67.1, 'B', 'Alexandria', 'Alexandria', 'VA', 'Washington Gas Light Company', '0016494148', 'YM', NULL, 'FB2', 'A', '06/04/2025', '06/01/2032'),
 (1657752, 'uls', 2, '5220718', 'WSKR751', 2, 1, 861137500, 861132600, 861142400, 9800, 'emission', '9K80D7W', '9K80D7W,20K0D7W,20K0F1D,20K0F3E', 150, 150, 38.95416666666667, -76.9775, 'fixed', 'exact', NULL, NULL, 25.9, 'LTOWER', 'Chillum', 'Chillum', 'MD', 'Washington Gas Light Company', '0016494148', 'YM', NULL, 'FB2', 'A', '06/04/2025', '06/01/2032');
+INSERT INTO unsited_license (call_sign, source_file_id, usi, licensee_name, frn, licensee_city, licensee_state, radio_service_code, license_status, grant_date, expired_date) VALUES
+('WPTZ766', 1, '2377049', 'District of Columbia', '0002088631', 'WASHINGTON', 'DC', 'SL', 'A', '02/15/2017', '05/14/2027'),
+('WPTZ775', 1, '2377058', 'Virginia, Commonwealth of', '0002067221', 'North Chesterfield', 'VA', 'SL', 'A', '02/15/2017', '05/14/2027'),
+('WPTZ785', 1, '2377068', 'Missouri, State of', '0002528958', 'Jefferson City', 'MO', 'SL', 'A', '02/21/2017', '05/14/2027'),
+('WPTZ805', 1, '2377089', 'STATE OF MARYLAND', '0004068177', 'CROWNSVILLE', 'MD', 'SL', 'A', '02/21/2017', '05/14/2027');

@@ -2,7 +2,9 @@
 // doing. Zoomed out, how many systems each state has; zoomed in, the systems
 // in view; with your location set (your browser's, a place or ZIP code typed,
 // or "Set my location here" on the map), the systems in range, nearest first
-// or by an estimate of how well each would be heard. Click a tower and every
+// or by an estimate of how well each would be heard. Zoomed in on a state, or
+// with your location set, its statewide systems too: licensed statewide with no
+// sites listed, so the map can't place them. Click a tower and every
 // tower of its system is ringed (a system can have many). Where the map is,
 // your location and every choice are in the URL. Only a location rounded to
 // ~3 km is sent to the directory; distances and the estimate are worked out here.
@@ -28,6 +30,7 @@ const LICENSED_ZOOM = 8;
 
 interface PlaceHit { geoid: string; kind: string; state: string; name: string; lat: number | null; lon: number | null }
 interface StateRow { state: string; name: string; systems: number; byType: Record<string, number> }
+interface Statewide { id: string; name: string; type: string; licensee: string; callSigns: string[]; serviceDesc: string; shared: boolean }
 interface Licensed { callSign: string; licensee: string; serviceDesc: string; lat: number; lon: number; stationClass: string; frequencies: number; kind: LicensedKind }
 
 /** "38.9072, -77.0369" (as a map copies it): a point, or null. */
@@ -85,6 +88,20 @@ export function ExplorePage(props: { query: URLSearchParams }) {
     const t = typesParam(types);
     get<{ systems: NearSystem[] }>(`/nearby?lat=${lat}&lon=${lon}&coarse=1&radiusKm=${radius}${t ? `&${t}` : ""}`).then((r) => setNear(r.systems), (e) => setError(String(e.message ?? e)));
   }, [me?.[0], me?.[1], radius, types.join(",")]);
+
+  // The state you're in, or the map's centre is (zoomed in on one): its statewide systems. Rounded to ~25 km, all the directory is told.
+  const focusAt = me ?? (zoom >= IN_VIEW_ZOOM && bounds ? ([(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2] as [number, number]) : null);
+  const [lat4, lon4] = focusAt ? focusAt.map((v) => (Math.round(v * 4) / 4).toFixed(2)) : [null, null];
+  const [statewide, setStatewide] = useState<{ state: string | null; name: string | null; systems: Statewide[] } | null>(null);
+  useEffect(() => {
+    if (lat4 === null) return setStatewide(null);
+    let gone = false;
+    const t = typesParam(types);
+    get<{ state: string | null; name: string | null; systems: Statewide[] }>(`/statewide?lat=${lat4}&lon=${lon4}${t ? `&${t}` : ""}`).then((r) => !gone && setStatewide(r), () => {});
+    return () => {
+      gone = true;
+    };
+  }, [lat4, lon4, types.join(",")]);
 
   const nearRows = useMemo(() => {
     if (!me || !near) return [];
@@ -355,6 +372,32 @@ export function ExplorePage(props: { query: URLSearchParams }) {
               ))}
             </ul>
             <p className="muted small">Zoom in for the systems in view, or set your location.</p>
+          </section>
+        )}
+
+        {statewide?.state && statewide.systems.length > 0 && (
+          <section className="stack">
+            <div className="row">
+              <h2>Statewide in {statewide.name}</h2>
+              <span className="spacer" />
+              <span className="muted small">{statewide.systems.length}</span>
+            </div>
+            <p className="muted small">Licensed across the state with no sites listed, so not on the map until their sites are shared.</p>
+            <ul className="cards">
+              {statewide.systems.map((s) => (
+                <li key={s.id} className={`card compact${s.shared ? "" : " licensed"}${focus === s.id ? " focus" : ""}`} onMouseEnter={() => s.shared && setHover(s.id)} onMouseLeave={() => setHover(null)}>
+                  <div className="row">
+                    <Link to={`/systems/${s.id}`} className="card-title">
+                      {nameOf(s)}
+                    </Link>
+                    {s.shared ? <TypeBadge type={s.type} /> : <span className="muted small">by its licence</span>}
+                  </div>
+                  <div className="muted small">
+                    {s.callSigns.join(", ")} · {s.shared ? "shared" : "no one has shared it yet"}
+                  </div>
+                </li>
+              ))}
+            </ul>
           </section>
         )}
 

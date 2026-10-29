@@ -6,7 +6,9 @@
 // and its licenses are those frequencies'. Which is its control channel, its
 // identity and its talkgroups come from the air. Its page, its bundle for
 // Trunk Recorder Pro (whose survey finds it by its licenses) and its SDR plan
-// are a shared system's.
+// are a shared system's. A license with no station listed (a state's
+// statewide one: stations.ts unsited) is a system with no sites: who holds it,
+// and that it's licensed statewide.
 
 import type { Db } from "./db.ts";
 import { named, type Where } from "./explore.ts";
@@ -14,18 +16,28 @@ import { licensedId } from "./ids.ts";
 import { licensedKind } from "./kinds.ts";
 import type { Places } from "./places.ts";
 import type { SiteView, SystemView } from "./read.ts";
-import { type FccRow, rowsOf, spotKey } from "./stations.ts";
+import { type FccRow, rowsOf, spotKey, unsited } from "./stations.ts";
 
 /** On the 6.25 kHz channel raster, as a system's licenses are kept. */
 const raster = (hz: number) => Math.round(hz / 6250) * 6250;
 const round = (v: number) => Math.round(v * 1e4) / 1e4;
 const max = (rows: FccRow[], f: (r: FccRow) => number | null) => rows.reduce<number | null>((m, r) => (f(r) == null ? m : Math.max(m ?? 0, f(r)!)), null);
 
-/** The system licensed to `callSign` (null: no active base or repeater station is), and where its stations are. */
+/** The system licensed to `callSign` (null: no active license has a base or repeater station, or no station at all), and where its stations are. */
 export async function licensedSystem(db: Db, fcc: Db, places: Places | undefined, callSign: string): Promise<{ system: SystemView; where: Where } | null> {
   const rows = await rowsOf(fcc, [callSign]);
-  if (!rows.length) return null;
   const id = licensedId(callSign);
+  if (!rows.length) {
+    const [u] = await unsited(fcc, "u.call_sign = ?", [callSign]);
+    if (!u) return null;
+    return {
+      system: {
+        id, rev: 0, type: "", name: "", licensee: u.licensee_name ?? "", wacn: null, sysId: null, status: "licensed", mergedInto: null,
+        lat: null, lon: null, createdAt: 0, updatedAt: 0, sites: [], licenses: {}, talkgroupCount: 0,
+      },
+      where: { transmitters: [], placements: [] },
+    };
+  }
   const licensee = rows[0].licensee_name ?? "";
   const bySpot = new Map<string, FccRow[]>();
   for (const r of rows) bySpot.set(spotKey(r.lat, r.lon), [...(bySpot.get(spotKey(r.lat, r.lon)) ?? []), r]);
