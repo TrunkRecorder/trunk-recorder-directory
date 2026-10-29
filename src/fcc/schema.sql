@@ -1,5 +1,6 @@
 -- ArgusRF's FCC ULS database (the D1 database `argus`), as its ingest builds it:
--- copied from robotastic/argusrf ingest/src/db.ts (SCHEMA + INDEXES) at faeb0c8.
+-- copied from robotastic/argusrf ingest/src/db.ts (SCHEMA + INDEXES) at faeb0c8,
+-- with unsited_license (ArgusRF's unsited-licenses branch).
 -- The FCC lookup reads it; tests and local runs build a small one from this.
 -- If ArgusRF changes its schema, copy it again (test/fcc.test.ts checks the columns the lookup reads).
 
@@ -167,6 +168,26 @@ CREATE TABLE radio_service (
   description TEXT NOT NULL
 );
 
+-- Active licenses with no site listed (no frequency at a located LO row), so
+-- no transmitter row: who holds a call sign heard on the air, though not where.
+-- ~25k (2026-10-18 data): mostly mobile-only licenses (an operating area, no
+-- coordinates), and each state's 700 MHz State License (SL, ~40), licensed
+-- statewide with no stations listed. The licensee's mailing address stands in
+-- for a location (a state license's is in its state).
+CREATE TABLE unsited_license (
+  call_sign          TEXT PRIMARY KEY,
+  source_file_id     INTEGER REFERENCES source_file(id),
+  usi                TEXT,
+  licensee_name      TEXT,
+  frn                TEXT,
+  licensee_city      TEXT,
+  licensee_state     TEXT,
+  radio_service_code TEXT,
+  license_status     TEXT,
+  grant_date         TEXT,
+  expired_date       TEXT
+);
+
 -- The money index. A frequency lookup is answered by a bounded range scan on
 -- freq_lower_hz (see shared/src/query.ts), so this ordering is what makes the
 -- whole thing work without an R-tree.
@@ -184,3 +205,6 @@ CREATE INDEX idx_tx_latlon ON transmitter(lat, lon);
 -- money index. call/latlon are not indexed here — the inactive table is only
 -- ever reached by frequency, never browsed.
 CREATE INDEX idx_txi_lower ON transmitter_inactive(freq_lower_hz, freq_upper_hz);
+
+-- A state's statewide licenses (the systems directory's map lists them).
+CREATE INDEX idx_unsited_state ON unsited_license(licensee_state);

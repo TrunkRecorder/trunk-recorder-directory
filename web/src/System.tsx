@@ -13,6 +13,7 @@ import { go, Link } from "./router.tsx";
 import { MapView } from "./MapView.tsx";
 import { Dialog, Page } from "./Page.tsx";
 import { SdrPlanner } from "./Sdrs.tsx";
+import { callSignOf } from "../../src/ids.ts";
 
 type Tab = "sites" | "talkgroups" | "licenses" | "sdrs" | "history";
 
@@ -43,7 +44,9 @@ export function SystemPage(props: { id: string; tab: Tab; query: URLSearchParams
   if (!sys) return <p className="muted">Loading…</p>;
   const licensed = sys.status === "licensed";
   const heard = sys.sites.filter((s) => s.status === "heard").length;
-  const callSigns = [...new Set(Object.values(sys.licenses).map((l) => l.callSign))];
+  // A license with no station listed (a state's statewide one): no sites, its call sign in its ID.
+  const unsited = licensed && !sys.sites.length;
+  const callSigns = unsited ? [callSignOf(sys.id) ?? ""] : [...new Set(Object.values(sys.licenses).map((l) => l.callSign))];
   const tab = (t: Tab, label: string) => (
     <Link to={`/systems/${sys.id}${t === "sites" ? "" : `/${t}`}${at}`} className={`tab${props.tab === t ? " on" : ""}`}>
       {label}
@@ -55,11 +58,14 @@ export function SystemPage(props: { id: string; tab: Tab; query: URLSearchParams
       title={title}
       label={title}
       self={`/systems/${sys.id}`}
-      fallback={[{ label: "Map", to: licensed ? `/?licensed=1&at=${sys.lat},${sys.lon}&z=10` : `/?sel=${sys.id}` }]}
+      fallback={[{ label: "Map", to: unsited ? "/" : licensed ? `/?licensed=1&at=${sys.lat},${sys.lon}&z=10` : `/?sel=${sys.id}` }]}
       actions={
-        <button className="btn primary" onClick={() => setAdding(true)}>
-          Add to Trunk Recorder Pro
-        </button>
+        // (A license with no sites has nothing to record from yet.)
+        unsited ? undefined : (
+          <button className="btn primary" onClick={() => setAdding(true)}>
+            Add to Trunk Recorder Pro
+          </button>
+        )
       }
       meta={
         licensed ? (
@@ -69,7 +75,7 @@ export function SystemPage(props: { id: string; tab: Tab; query: URLSearchParams
             </span>
             <span className="mono">{callSigns.join(", ")}</span>
             <span>
-              {sys.sites.length} licensed site{sys.sites.length === 1 ? "" : "s"} · {Object.keys(sys.licenses).length} frequencies
+              {unsited ? "licensed statewide, no sites listed" : `${sys.sites.length} licensed site${sys.sites.length === 1 ? "" : "s"} · ${Object.keys(sys.licenses).length} frequencies`}
             </span>
           </>
         ) : (
@@ -99,7 +105,12 @@ export function SystemPage(props: { id: string; tab: Tab; query: URLSearchParams
           </span>
         </div>
       )}
-      {licensed && (
+      {unsited && (
+        <div className="banner">
+          Licensed statewide, so its license lists no sites or frequencies: where its towers are and what they send come from the air. Recording it with Trunk Recorder Pro? Turn on Share in its Setup, and it's placed by the licenses its sites send.
+        </div>
+      )}
+      {licensed && !unsited && (
         <div className="banner">
           Licensed, but no one has shared it yet: this is what its FCC license says. Which frequency is its control channel, its identity and its talkgroups come from the air: add it to Trunk Recorder Pro, and its survey looks for it.
         </div>

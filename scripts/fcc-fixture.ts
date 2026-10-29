@@ -6,7 +6,8 @@
 //
 // Rows: every transmitter of the licenses the tests name (DC Fire and EMS,
 // Arlington County, WMATA), and the trunked base stations in central
-// Washington (the "licensed, not shared yet" layer's).
+// Washington (the "licensed, not shared yet" layer's); and the State Licenses
+// (no sites listed) of DC, Maryland, Virginia and Missouri (MOSWIN's, WPTZ785).
 
 import Database from "better-sqlite3";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -46,16 +47,18 @@ const tx = db
       ORDER BY t.id`,
   )
   .all(...CALL_SIGNS, ...BOX.lat, ...BOX.lon) as Record<string, unknown>[];
+const unsited = db.prepare("SELECT * FROM unsited_license WHERE radio_service_code = 'SL' AND licensee_state IN ('DC', 'MD', 'VA', 'MO') ORDER BY call_sign").all() as Record<string, unknown>[];
 const services = db.prepare("SELECT * FROM radio_service ORDER BY code").all() as Record<string, unknown>[];
 const files = db.prepare("SELECT * FROM source_file ORDER BY id").all() as Record<string, unknown>[];
 const date = String(db.prepare("SELECT MAX(COALESCE(fcc_published_at, downloaded_at)) AS d FROM source_file").pluck().get() ?? "");
 
 const header = `-- A small FCC database for tests and offline runs: ArgusRF's schema (src/fcc/schema.sql)
 -- with real rows from an ArgusRF build (FCC data of ${date}), made by scripts/fcc-fixture.ts:
--- DC Fire and EMS, Arlington County and WMATA licenses, and the trunked base
--- stations in central Washington. Real rows, so the same end-to-end assertions
+-- DC Fire and EMS, Arlington County and WMATA licenses, the trunked base
+-- stations in central Washington, and DC's, Maryland's, Virginia's and
+-- Missouri's State Licenses (no sites listed). Real rows, so the same end-to-end assertions
 -- hold offline, on staging and on production.
 `;
-const sql = [header, readFileSync(join(ROOT, "src/fcc/schema.sql"), "utf8"), inserts("source_file", files), inserts("radio_service", services), inserts("transmitter", tx), ""].join("\n");
+const sql = [header, readFileSync(join(ROOT, "src/fcc/schema.sql"), "utf8"), inserts("source_file", files), inserts("radio_service", services), inserts("transmitter", tx), inserts("unsited_license", unsited), ""].join("\n");
 writeFileSync(join(ROOT, "test/fixtures/fcc.sql"), sql);
-console.log(`test/fixtures/fcc.sql: ${tx.length} transmitters (${new Set(tx.map((t) => t.call_sign)).size} licenses), ${(sql.length / 1024).toFixed(0)} KB`);
+console.log(`test/fixtures/fcc.sql: ${tx.length} transmitters (${new Set(tx.map((t) => t.call_sign)).size} licenses), ${unsited.length} unsited licenses, ${(sql.length / 1024).toFixed(0)} KB`);

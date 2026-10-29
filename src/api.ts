@@ -11,7 +11,7 @@ import { keeper, mergeSystems } from "./merge.ts";
 import { NameIndex } from "./names.ts";
 import { Invalid, parseObservation, type Observation } from "./observation.ts";
 import { changeset, diff, getSystem, getTalkgroups, history, search, talkgroupsCsv, trpBundle } from "./read.ts";
-import { city, county, countyCounts, mapSites, nearby, parseTypes, placesNamed, sharedCallSigns, sharedSystemOf, state, states, where } from "./explore.ts";
+import { city, county, countyCounts, mapSites, nearby, parseTypes, placesNamed, sharedCallSigns, sharedSystemOf, state, stateAt, states, statewide, where } from "./explore.ts";
 import { callSignOf } from "./ids.ts";
 import { licensedSystem } from "./licensed.ts";
 import { shareTowers } from "./place.ts";
@@ -237,6 +237,19 @@ export async function handle(env: Env, req: Request): Promise<Response> {
         const at: [number, number] = [lat, lon];
         const radius = Math.min(num(q.get("radiusKm")) ?? 50, 250);
         return json({ at, systems: await nearby(db, at, radius + (q.get("coarse") === "1" ? 4 : 0), types) });
+      }
+      if (path === "/statewide") {
+        // A state's statewide systems: `state=MO`, or the state at a point (the map's, rounded), not kept.
+        let st = (q.get("state") ?? "").toUpperCase();
+        if (!st) {
+          const lat = num(q.get("lat"));
+          const lon = num(q.get("lon"));
+          if (lat === undefined || lon === undefined) return err(400, "state, or lat and lon");
+          st = (env.places ? await stateAt(db, env.places, lat, lon) : null) ?? "";
+        }
+        if (!/^[A-Z]{2}$/.test(st)) return json({ state: null, name: null, systems: [] });
+        const name = ((await first<{ name: string }>(db, "SELECT name FROM places WHERE kind = 'state' AND geoid = ?", [st]))?.name as string) ?? st;
+        return json({ state: st, name, systems: env.fcc ? await statewide(db, env.fcc, st, types) : [] });
       }
       if (path === "/identify") {
         const claim = (q.get("claim") ?? "").toLowerCase();
