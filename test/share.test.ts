@@ -98,6 +98,22 @@ test("a neighbour with another SysID isn't made a site of this system", async ()
   assert.deepEqual(sites.map((x: any) => [x.rfss, x.site, x.status]), [[1, 1, "heard"], [1, 2, "announced"]]);
 });
 
+test("a neighbour of another WACN (the same SysID): claimed under its own system, not made a site of this one, nor evidence they're one", async () => {
+  const d = directory();
+  const other = await d.share(obs(recorder(), [p25Site(2, 1, 854e6, { wacn: 0xabcde })]));
+  const s = p25Site(1, 1, 851e6);
+  s.heard!.neighbours = [{ wacn: 0xabcde, sysId: 0x3a9, rfss: 2, site: 1, freqHz: 854e6 }, { wacn: 0xbee01, sysId: 0x3a9, rfss: 1, site: 2, freqHz: 853e6 }];
+  const r = recorder();
+  const a = await d.share(obs(r, [s]));
+  const again = await d.share(obs(r, [s]));
+  assert.notEqual(a.json.system, other.json.system);
+  assert.equal(again.json.system, a.json.system);
+  assert.deepEqual(again.json.merged ?? [], [], "no merge");
+  const sites = (await d.get(`/systems/${a.json.system}`)).json.sites;
+  assert.deepEqual(sites.map((x: any) => [x.rfss, x.site, x.status]), [[1, 1, "heard"], [1, 2, "announced"]]);
+  assert.deepEqual((await d.get(`/systems/${other.json.system}`)).json.sites.map((x: any) => [x.rfss, x.site]), [[2, 1]]);
+});
+
 test("each share is kept as it came, and recorded", async () => {
   const d = directory();
   const r = recorder();

@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { callSignClaim, DEFAULT_WACN, neighbourClaim, siteClaims, systemClaim } from "../src/claims.ts";
+import { callSignClaim, DEFAULT_WACN, neighbourClaim, ownNeighbour, siteClaims, systemClaim } from "../src/claims.ts";
 import { cellOf, distanceKm, regionOf, regionsNear } from "../src/geo.ts";
 import { DC, DENVER } from "./helpers.ts";
 
@@ -36,11 +36,21 @@ test("a site's claims: its identity under the system's, and each control channel
   assert.deepEqual(siteClaims("p25", { wacn: 0xbee01, sysId: 0x3a9 }, [851e6], null), [], "no region, no site number: nothing to match");
 });
 
-test("a neighbour's claim is under the announcing site's system (its own SysID if it says one)", () => {
+test("a neighbour's claim is under its own system: the announcing site's, unless it says its WACN or SysID", () => {
   const id = { wacn: 0xbee01, sysId: 0x3a9, rfss: 1, site: 1 };
   assert.deepEqual(neighbourClaim("p25", id, { rfss: 1, site: 2 }, region)!.store, ["p25:bee01.3a9/1.2"]);
   assert.deepEqual(neighbourClaim("p25", id, { sysId: 0x3aa, rfss: 1, site: 2 }, region)!.store, ["p25:bee01.3aa/1.2"]);
+  assert.deepEqual(neighbourClaim("p25", id, { wacn: 0xabcde, sysId: 0x3a9, rfss: 1, site: 2 }, region)!.store, ["p25:abcde.3a9/1.2"]);
   assert.equal(neighbourClaim("smartnet", id, { rfss: 1, site: 2 }, region), null);
+});
+
+test("a neighbour of the announcing site's own system: the same SysID, and WACN where both have one", () => {
+  const id = { wacn: 0xbee01, sysId: 0x3a9, rfss: 1, site: 1 };
+  assert.ok(ownNeighbour(id, { rfss: 1, site: 2 }));
+  assert.ok(ownNeighbour(id, { wacn: 0xbee01, sysId: 0x3a9, rfss: 1, site: 2 }));
+  assert.ok(!ownNeighbour(id, { sysId: 0x3aa, rfss: 1, site: 2 }), "another SysID");
+  assert.ok(!ownNeighbour(id, { wacn: 0xabcde, sysId: 0x3a9, rfss: 1, site: 2 }), "another WACN");
+  assert.ok(ownNeighbour({ sysId: 0x1a, site: 4 }, { wacn: 0, sysId: 0x1a, rfss: 0, site: 5 }), "NXDN: no WACN to disagree on");
 });
 
 test("regions (where a system's towers are) and distances", () => {

@@ -54,10 +54,28 @@ export function siteClaims(type: string, id: SiteIdentity, controlChannelsHz: nu
   return out;
 }
 
-/** A neighbour a site announces, as its site claim (P25: the same WACN; its SysID if it says one). */
-export function neighbourClaim(type: string, id: SiteIdentity, n: { sysId?: number | null; rfss: number; site: number }, region: string | null): ClaimKeys | null {
+/** A neighbour as an identity: its WACN and SysID if it says them, else the announcing site's. */
+export const neighbourId = (id: SiteIdentity, n: { wacn?: number | null; sysId?: number | null; rfss: number; site: number }): SiteIdentity => ({
+  wacn: n.wacn ?? id.wacn,
+  sysId: n.sysId ?? id.sysId,
+  rfss: n.rfss,
+  site: n.site,
+});
+
+/**
+ * A neighbour of the announcing site's own system, not a neighbouring
+ * system's: the same SysID, and the same WACN where both have one (NXDN's
+ * sites have none).
+ */
+export function ownNeighbour(id: SiteIdentity, n: { wacn?: number | null; sysId?: number | null; rfss: number; site: number }): boolean {
+  const m = neighbourId(id, n);
+  return m.sysId === id.sysId && (id.wacn == null || m.wacn === id.wacn);
+}
+
+/** A neighbour a site announces, as its site claim (P25: under its own WACN and SysID, the announcing site's unless it says them). */
+export function neighbourClaim(type: string, id: SiteIdentity, n: { wacn?: number | null; sysId?: number | null; rfss: number; site: number }, region: string | null): ClaimKeys | null {
   if (type !== "p25") return null;
-  const sys = systemClaim(type, { ...id, sysId: n.sysId ?? id.sysId }, region);
+  const sys = systemClaim(type, neighbourId(id, n), region);
   return sys && { store: sys.store.map((k) => `${k}/${n.rfss}.${n.site}`), lookup: sys.lookup.map((k) => `${k}/${n.rfss}.${n.site}`), strong: true };
 }
 

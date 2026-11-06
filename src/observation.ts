@@ -36,8 +36,8 @@ export interface ObservedSite {
     controlChannelHz?: number | null;
     /** Voice channels granted, with how many grants. */
     voice?: { freqHz: number; grants: number }[];
-    /** Neighbouring sites the control channel announces. */
-    neighbours?: { sysId?: number | null; rfss: number; site: number; freqHz: number }[];
+    /** Neighbouring sites the control channel announces: absent WACN or SysID, the announcing site's (another's: a neighbouring system's site). */
+    neighbours?: { wacn?: number | null; sysId?: number | null; rfss: number; site: number; freqHz: number }[];
     /** Call signs heard on the air (Motorola's base station ID). */
     callSigns?: { freqHz: number; callSign: string }[];
     /** Control messages decoded and lost. */
@@ -124,7 +124,7 @@ export function parseObservation(x: unknown): Observation {
         voice: (Array.isArray(h.voice) ? h.voice : []).filter((v) => isFreq(v?.freqHz) && isInt(v?.grants)).slice(0, MAX_FREQS),
         neighbours: (Array.isArray(h.neighbours) ? h.neighbours : [])
           .filter((n) => isInt(n?.rfss, 0, 255) && isInt(n?.site, 0, 255) && isFreq(n?.freqHz))
-          .map((n) => ({ sysId: isInt(n.sysId, 0, 0xffff) ? n.sysId : null, rfss: n.rfss, site: n.site, freqHz: n.freqHz }))
+          .map((n) => ({ wacn: isInt(n.wacn, 0, 0xfffff) ? n.wacn : null, sysId: isInt(n.sysId, 0, 0xffff) ? n.sysId : null, rfss: n.rfss, site: n.site, freqHz: n.freqHz }))
           .slice(0, 64),
         callSigns: (Array.isArray(h.callSigns) ? h.callSigns : [])
           .filter((c) => isFreq(c?.freqHz) && typeof c?.callSign === "string" && /^[A-Z0-9]{3,8}$/.test(c.callSign))

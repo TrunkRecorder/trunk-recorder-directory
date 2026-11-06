@@ -553,7 +553,7 @@ needs to have seen it all.
 ### The air already describes the rest of the system
 
 A P25 control channel announces its neighbours (adjacent site status: their RFSS,
-site and control channel). SmartNet and NXDN have their own forms of this. TRP already
+site and control channel; a neighbouring system's with its WACN and SysID too). SmartNet and NXDN have their own forms of this. TRP already
 decodes them (the Decode page's *Neighbouring sites*).
 - **A neighbour no one is recording** becomes an **announced site**: its identity and
   control channel, marked *announced, not heard*. Its FCC license (the control
@@ -564,6 +564,9 @@ decodes them (the Decode page's *Neighbouring sites*).
   one has ever recorded.
 - **Announcements as links:** each announcement also records which site announced
   which. That is strong evidence for merging (below).
+- **A neighbouring system's site** (another WACN or SysID: one its radios roam to) is
+  claimed under its own system's identity, not this one's: it isn't made an announced
+  site of this system, and isn't evidence that the two are one.
 
 ### Talkgroups on a big system
 
