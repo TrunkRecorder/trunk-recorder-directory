@@ -11,9 +11,19 @@ import { ExplorePage } from "./Explore.tsx";
 import { go, Link, useRoute } from "./router.tsx";
 import { SearchPage } from "./Search.tsx";
 import { SystemPage } from "./System.tsx";
-import { setPref, useTheme, type ThemePref } from "./theme.ts";
+import { forceTheme, setPref, useTheme, type ThemePref } from "./theme.ts";
+import { TourPage } from "./Tour.tsx";
 import "./style.css";
 
+/** The site's mark, as the landing page has it (trunkrecorder.pro). */
+function Mark() {
+  return (
+    <svg className="mark" viewBox="0 0 32 32" aria-hidden="true">
+      <rect width="32" height="32" rx="7" fill="#0d1117" />
+      <path d="M6 22 L11 12 L16 19 L21 8 L26 22" stroke="#3fb6ff" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 function Redirect(props: { to: string }) {
   useEffect(() => go(props.to, true), []);
@@ -49,6 +59,8 @@ function SearchBox(props: { q: string }) {
 
 function App() {
   const { path, query } = useRoute();
+  // A page for another page to show (the landing page's map): no header or footer.
+  if (path === "/embed/tour") return <TourPage />;
   let page: React.ReactNode;
   let m: RegExpExecArray | null;
   let wide = false;
@@ -67,25 +79,65 @@ function App() {
   return (
     <>
       <header className="top">
-        <Link to="/" className="brand">
-          <span className="logo" aria-hidden="true" />
-          <span className="brand-name">Systems directory</span>
-        </Link>
-        <nav className="navs" aria-label="Views">
-          {nav("/", "Map", path === "/" || path === "/map")}
-          {nav("/browse", "Browse", path.startsWith("/browse"))}
-        </nav>
-        <SearchBox key={query.get("q") ?? ""} q={path === "/search" ? (query.get("q") ?? "") : ""} />
-        <ThemeSwitch />
+        <div className="top-inner">
+          <a href="/" className="brand" aria-label="Trunk Recorder Pro home">
+            <Mark />
+            <span className="brand-name">Trunk Recorder Pro</span>
+          </a>
+          <span className="brand-sep" aria-hidden="true">/</span>
+          <Link to="/" className="brand-sub">
+            Directory
+          </Link>
+          <nav className="navs" aria-label="Views">
+            {nav("/", "Map", path === "/" || path === "/map")}
+            {nav("/browse", "Browse", path.startsWith("/browse"))}
+          </nav>
+          <SearchBox key={query.get("q") ?? ""} q={path === "/search" ? (query.get("q") ?? "") : ""} />
+          <ThemeSwitch />
+          <a className="btn primary top-cta" href="/#install">
+            Get Trunk Recorder Pro
+          </a>
+        </div>
       </header>
       <main className={wide ? "wide" : ""}>{page}</main>
       {!wide && (
-        <footer className="foot muted small">
-          Shared by Trunk Recorder Pro users from what their radios decode. Licenses from the FCC, places from the Census Bureau (public domain); map © OpenStreetMap contributors. Nothing here comes from RadioReference.
+        <footer className="foot">
+          <div className="foot-inner">
+            <div className="foot-brand">
+              <a href="/" className="brand">
+                <Mark />
+                <span>Trunk Recorder Pro</span>
+              </a>
+              <p className="muted small">
+                Shared by Trunk Recorder Pro users from what their radios decode. Licenses from the FCC, places from the Census Bureau (public domain); map © OpenStreetMap contributors. Nothing here comes from RadioReference.
+              </p>
+            </div>
+            <div className="foot-links">
+              <div>
+                <h5>Directory</h5>
+                <Link to="/">Map</Link>
+                <Link to="/browse">Browse by place</Link>
+                <a href="https://github.com/TrunkRecorder/trunk-recorder-directory#the-api">API</a>
+              </div>
+              <div>
+                <h5>Trunk Recorder Pro</h5>
+                <a href="/">Home</a>
+                <a href="/#install">Install</a>
+                <a href="/app/">Web app</a>
+                <a href="https://github.com/TrunkRecorder/trunk-recorder-pro">Source code</a>
+              </div>
+            </div>
+          </div>
         </footer>
       )}
     </>
   );
+}
+
+// The embedded map is shown as the page around it is (?theme=), whatever this browser chose for the directory.
+if (location.pathname.startsWith("/directory/embed/")) {
+  const t = new URLSearchParams(location.search).get("theme");
+  if (t === "light" || t === "dark") forceTheme(t);
 }
 
 createRoot(document.getElementById("root")!).render(

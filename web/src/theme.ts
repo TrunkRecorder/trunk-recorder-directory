@@ -7,7 +7,15 @@ import { useEffect, useState } from "react";
 export type ThemePref = "system" | "light" | "dark";
 const KEY = "trp.directory.theme";
 
+/** A theme the page is shown in whatever the viewer chose, and not kept (the embedded map's, set by the page around it). */
+let forced: "light" | "dark" | null = null;
+export function forceTheme(t: "light" | "dark") {
+  forced = t;
+  apply(t);
+}
+
 export function readPref(): ThemePref {
+  if (forced) return forced;
   try {
     const v = localStorage.getItem(KEY);
     return v === "light" || v === "dark" ? v : "system";

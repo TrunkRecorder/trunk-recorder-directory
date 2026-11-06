@@ -261,8 +261,19 @@ export async function handle(env: Env, req: Request): Promise<Response> {
       }
       if (path === "/merge-proposals") return json({ proposals: await db.all("SELECT * FROM merge_proposals WHERE status = 'open' ORDER BY score DESC, at DESC LIMIT 100") }, 200, { "cache-control": "no-store" });
       if (path === "/meta") {
-        const n = await first<Row>(db, "SELECT (SELECT COUNT(*) FROM systems WHERE status = 'active') AS systems, (SELECT COUNT(*) FROM sites) AS sites, (SELECT COUNT(*) FROM talkgroups) AS talkgroups, (SELECT COUNT(*) FROM observations) AS shares");
-        return json({ v: 1, ...n });
+        // What's in the directory, in numbers (the landing page shows them too): where it is, from active systems'
+        // placed transmitters; who shared it, the recorders whose shares were applied.
+        const n = await first<Row>(
+          db,
+          `SELECT (SELECT COUNT(*) FROM systems WHERE status = 'active') AS systems, (SELECT COUNT(*) FROM sites) AS sites, (SELECT COUNT(*) FROM talkgroups) AS talkgroups, (SELECT COUNT(*) FROM observations) AS shares,
+             (SELECT COUNT(DISTINCT recorder_id) FROM observations WHERE status = 'applied') AS recorders, (SELECT MAX(at) FROM observations WHERE status = 'applied') AS lastShare`,
+        );
+        const placed = await first<Row>(
+          db,
+          `SELECT COUNT(*) AS transmitters, COUNT(DISTINCT NULLIF(x.state, '')) AS states, COUNT(DISTINCT NULLIF(x.county, '')) AS counties
+             FROM site_transmitters x JOIN sites s ON s.id = x.site_id JOIN systems y ON y.id = s.system_id WHERE y.status = 'active'`,
+        );
+        return json({ v: 1, ...n, ...placed });
       }
       return err(404, "not found");
     }
