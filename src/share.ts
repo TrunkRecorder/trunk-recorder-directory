@@ -8,7 +8,7 @@
 // wrote is an assertion ([names.ts]) and only what they changed from the
 // version they imported counts. One share is one change set.
 
-import { type ClaimKeys, callSignClaim, neighbourClaim, siteClaims, systemClaim } from "./claims.ts";
+import { type ClaimKeys, callSignClaim, neighbourClaim, ownNeighbour, siteClaims, systemClaim } from "./claims.ts";
 import { type Db, type Row, insertRows, marks } from "./db.ts";
 import { NameIndex } from "./names.ts";
 import type { Observation, ObservedSite, SiteIdentity } from "./observation.ts";
@@ -205,7 +205,7 @@ export async function matchShare(db: Db, obs: Observation, from: ShareFrom = own
     // Neighbours announced with the same identity that are another system's sites.
     for (const [i, s] of obs.system.sites.entries()) {
       for (const n of s.heard?.neighbours ?? []) {
-        if ((n.sysId ?? ids[i].sysId) !== ids[i].sysId) continue;
+        if (!ownNeighbour(ids[i], n)) continue;
         const nc = neighbourClaim(obs.system.type, ids[i], n, region);
         const hit = nc && (await lookupClaims(cs, [nc], "site"))[0];
         const site = hit ? await cs.get("site", hit.id) : null;
@@ -311,13 +311,13 @@ export async function applyShare(db: Db, obs: Observation, observationId: string
           const nbSys = nb ? await resolve(db, nb.system_id as string) : null;
           if (nbSys && nbSys !== sys) {
             // Announced as a neighbour with the same identity: the same system (or the same network).
-            if ((n.sysId ?? id.sysId) === id.sysId) evidence(nbSys, `its site ${n.rfss}-${n.site} is announced as a neighbour by site ${id.rfss}-${id.site} of this one`, true);
+            if (ownNeighbour(id, n)) evidence(nbSys, `its site ${n.rfss}-${n.site} is announced as a neighbour by site ${id.rfss}-${id.site} of this one`, true);
             nb = null;
           }
         }
       }
-      // (A neighbour of another SysID is another system of a network: not made here.)
-      if (!nb && (n.sysId == null || n.sysId === id.sysId)) {
+      // (A neighbour of another WACN or SysID is another system: not made here.)
+      if (!nb && ownNeighbour(id, n)) {
         nb = sitesNow.find((x) => x.rfss === n.rfss && x.site === n.site) ?? null;
         if (!nb) {
           nb = await cs.create("site", {

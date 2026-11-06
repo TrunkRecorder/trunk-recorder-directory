@@ -44,7 +44,7 @@ test("fields of the wrong type are dropped, not trusted", () => {
   s.controlChannelsHz = [851e6, "852e6", -1, 1e12, NaN];
   s.expect = { wacn: -1, sysId: 0x10000, rfss: 1.5, site: 2, nac: "443" };
   s.heard.voice = [{ freqHz: 852e6, grants: 3 }, { freqHz: "x", grants: 1 }, { freqHz: 853e6, grants: -1 }];
-  s.heard.neighbours = [{ rfss: 1, site: 2, freqHz: 852e6 }, { rfss: 300, site: 1, freqHz: 852e6 }];
+  s.heard.neighbours = [{ rfss: 1, site: 2, freqHz: 852e6 }, { rfss: 300, site: 1, freqHz: 852e6 }, { wacn: 0x100000, rfss: 1, site: 3, freqHz: 853e6 }, { wacn: 0xabcde, sysId: 0x97, rfss: 1, site: 4, freqHz: 854e6 }];
   s.heard.callSigns = [{ freqHz: 852e6, callSign: "KNJA391" }, { freqHz: 852e6, callSign: "lower1" }, { freqHz: 852e6, callSign: "AB" }];
   s.directoryId = "../etc";
   o.talkgroups = [{ number: 100, alpha: "A".repeat(200), source: "rr" }, { number: 0 }, { number: 2 ** 25 }, { number: 101, priority: 3 }];
@@ -57,7 +57,7 @@ test("fields of the wrong type are dropped, not trusted", () => {
   assert.deepEqual(p.system.sites[0].controlChannelsHz, [851e6]);
   assert.deepEqual(p.system.sites[0].expect, { site: 2 });
   assert.deepEqual(p.system.sites[0].heard!.voice, [{ freqHz: 852e6, grants: 3 }]);
-  assert.equal(p.system.sites[0].heard!.neighbours!.length, 1);
+  assert.deepEqual(p.system.sites[0].heard!.neighbours!.map((n) => [n.wacn, n.sysId, n.site]), [[null, null, 2], [null, null, 3], [0xabcde, 0x97, 4]], "a WACN out of range: as if not said");
   assert.deepEqual(p.system.sites[0].heard!.callSigns!.map((c) => c.callSign), ["KNJA391"]);
   assert.equal(p.system.sites[0].directoryId, undefined);
   assert.deepEqual(p.talkgroups!.map((t) => t.number), [100, 101]);
