@@ -103,7 +103,10 @@ test("meta counts what's there", async () => {
   const d = directory();
   await d.share(obs(recorder(), [p25Site(1, 1, 851e6)], { talkgroups: [{ number: 1, alpha: "x" }] }));
   const m = (await d.get("/meta")).json;
-  assert.deepEqual([m.v, m.systems, m.sites, m.talkgroups, m.shares], [1, 1, 1, 1, 1]);
+  assert.deepEqual([m.v, m.systems, m.sites, m.talkgroups, m.shares, m.recorders], [1, 1, 1, 1, 1, 1]);
+  assert.equal(typeof m.lastShare, "number");
+  // (Not placed: there's no FCC database here.)
+  assert.deepEqual([m.transmitters, m.states, m.counties], [0, 0, 0]);
 });
 
 test("a system's candidates: only fields with a disagreement", async () => {

@@ -43,7 +43,11 @@ It lives on paths of trunkrecorder.pro:
     refresh, point `FCC_DB` (both environments, `wrangler.toml`) at the new one and deploy.
   - Its query code and schema are a marked copy of ArgusRF's: copy them again if ArgusRF changes them.
 
-The landing page stays its own static site ([trunk-recorder-pro-site](https://github.com/TrunkRecorder/trunk-recorder-pro-site)).
+The landing page stays its own static site ([trunk-recorder-pro-site](https://github.com/TrunkRecorder/trunk-recorder-pro-site)),
+but the two look alike: the directory uses the landing page's palette, fonts, icon, header and footer. The landing
+page shows the directory's numbers (`/meta`) and its map: **`/directory/embed/tour`** (`web/src/Tour.tsx`), a page
+with no header that flies from one shared system to the next, in a frame (`?theme=light|dark`; the page around it
+sends `{trpTour: "pause" | "play"}` as it scrolls out of and into sight).
 
 ## Layout
 
@@ -115,6 +119,7 @@ and is rate-limited. Stewards' and admins' actions need `ADMIN_TOKEN` (bearer) u
 | `GET /nearby?lat=&lon=[&coarse=1]&radiusKm=` | Systems with a transmitter in range, nearest first, with their transmitters (power, height, frequency). The point isn't stored. |
 | `GET /statewide?state=MO` or `?lat=&lon=` | A state's statewide systems (the one a point is in; the point isn't stored): its State Licenses, which list no sites, each as the shared system that sends its call sign, or as the license (`fcc_<call sign>`) |
 | `GET /identify?claim=p25:bee00.3a9/1.5` | What an identity heard on the air is |
+| `GET /meta` | The directory in numbers: `systems`, `sites`, `talkgroups`, `shares`, `recorders` (whose shares were applied), `lastShare`, and where its placed transmitters are (`transmitters`, `states`, `counties`) |
 | `POST /observations` | A share from TRP (`src/observation.ts`) |
 | `POST /changesets/{id}/revert`, `POST /systems/{id}/revert {to}`, `POST /actors/{id}/revert` | Revert (token) |
 | `POST /merges {a, b, why}`, `GET /merge-proposals`, `POST /merge-proposals/{id}/reject` | Merging (token) |

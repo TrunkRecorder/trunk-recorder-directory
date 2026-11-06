@@ -1,74 +1,114 @@
+/* The landing page's look (trunkrecorder.pro, public/styles.css): its palette, type, pill buttons and header, so
+   the directory reads as part of the same site. Dark is its night sections' colours. */
 :root {
-  --bg: #f7f8fa;
+  --bg: #f6f8fb;
   --panel: #ffffff;
-  --ink: #16191d;
-  --muted: #5f6873;
-  --line: #e1e4e8;
-  --accent: #2f7ff5;
+  --ink: #0b1a2e;
+  --text: #3c4d63;
+  --muted: #66778c;
+  --line: #e3e8ef;
+  --accent: #0a7bd6;
   --accent-ink: #ffffff;
+  --primary: #0b1a2e;
+  --primary-hover: #1b3352;
   --bad: #c9302c;
-  --good: #1f9e74;
-  --fair: #b8860b;
-  --radius: 10px;
+  --good: #16965c;
+  --fair: #b7791f;
+  --radius: 12px;
+  --top-h: 64px;
+  --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --shadow-md: 0 13px 27px -5px rgba(11, 26, 46, .15), 0 8px 16px -8px rgba(11, 26, 46, .2);
   color-scheme: light;
 }
 /* Dark: as the system is, unless the viewer chose light; or chosen. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0f1216;
-    --panel: #171b21;
-    --ink: #e8ebef;
-    --muted: #98a2ad;
-    --line: #2a3038;
-    --accent: #5c9bff;
-    --good: #3cc493;
+    --bg: #0b1220;
+    --panel: #121b2c;
+    --ink: #f2f6fb;
+    --text: #c3cfdf;
+    --muted: #8b9ab0;
+    --line: #233049;
+    --accent: #3fb6ff;
+    --accent-ink: #0b1220;
+    --primary: #3fb6ff;
+    --primary-hover: #7fd0ff;
+    --good: #2fc488;
     --fair: #e0b31e;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0f1216;
-  --panel: #171b21;
-  --ink: #e8ebef;
-  --muted: #98a2ad;
-  --line: #2a3038;
-  --accent: #5c9bff;
-  --good: #3cc493;
+  --bg: #0b1220;
+  --panel: #121b2c;
+  --ink: #f2f6fb;
+  --text: #c3cfdf;
+  --muted: #8b9ab0;
+  --line: #233049;
+  --accent: #3fb6ff;
+  --accent-ink: #0b1220;
+  --primary: #3fb6ff;
+  --primary-hover: #7fd0ff;
+  --good: #2fc488;
   --fair: #e0b31e;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 400 15px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
 a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-h1 { font-size: 26px; margin: 0; }
-h2 { font-size: 18px; margin: 0; }
+a:hover { text-decoration: underline; text-underline-offset: 3px; }
+b, strong { color: var(--ink); font-weight: 600; }
+h1, h2, h3, h4 { color: var(--ink); letter-spacing: -.02em; }
+h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 700; }
+h2 { font-size: 18px; margin: 0; font-weight: 650; }
 h3 { margin: 0; }
-main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
-.top { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
-.navs { display: flex; gap: 2px; }
-.nav { padding: 6px 10px; border-radius: 8px; color: var(--muted); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+/* The map's page fills the window below the header; every other page scrolls with a footer. */
+#root { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
+#root:has(> main.wide) { height: 100vh; height: 100dvh; }
+main { width: 100%; max-width: 1160px; margin: 0 auto; padding: 32px 24px 56px; flex: 1 0 auto; }
+main.wide { max-width: none; padding: 0; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+
+/* The header: the landing page's, with the directory's views and search in it. */
+.top { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--panel) 80%, transparent); backdrop-filter: saturate(1.6) blur(14px); -webkit-backdrop-filter: saturate(1.6) blur(14px); border-bottom: 1px solid var(--line); }
+.top-inner { display: flex; align-items: center; gap: 14px; min-height: var(--top-h); padding: 10px 24px; flex-wrap: wrap; }
+.brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; letter-spacing: -.01em; color: var(--ink); }
+.brand:hover, .brand-sub:hover { text-decoration: none; }
+.brand .mark { width: 28px; height: 28px; flex: none; }
+.brand-sep { color: var(--line); font-size: 22px; font-weight: 300; margin: 0 -4px; }
+.brand-sub { font-weight: 650; font-size: 16px; color: var(--accent); letter-spacing: -.01em; }
+.navs { display: flex; gap: 2px; margin-left: 6px; }
+.nav { padding: 6px 12px; border-radius: 999px; color: var(--text); font-weight: 500; }
 .nav:hover { text-decoration: none; color: var(--ink); }
 .nav.on { color: var(--ink); background: color-mix(in srgb, var(--accent) 12%, transparent); font-weight: 600; }
 .top-search { flex: 1; min-width: 180px; display: flex; }
-.top-search input { flex: 1; min-width: 0; }
-.theme { padding: 6px 8px; }
-main.wide { max-width: none; padding: 0; }
-.brand { display: flex; align-items: center; gap: 8px; font-weight: 650; color: var(--ink); }
-.logo { width: 18px; height: 18px; border-radius: 4px; background: var(--accent); }
-.foot { max-width: 1100px; margin: 0 auto; padding: 0 16px 32px; }
+.top-search input { flex: 1; min-width: 0; border-radius: 999px; padding-left: 14px; background: color-mix(in srgb, var(--bg) 70%, var(--panel)); }
+.theme { padding: 6px 8px; border-radius: 999px; }
+.top-cta { flex: none; }
+
+/* The footer: the landing page's. */
+.foot { border-top: 1px solid var(--line); background: var(--panel); }
+.foot-inner { max-width: 1160px; margin: 0 auto; padding: 40px 24px 48px; display: flex; justify-content: space-between; gap: 32px 48px; flex-wrap: wrap; }
+.foot-brand { max-width: 460px; }
+.foot-brand p { margin: 12px 0 0; line-height: 1.6; }
+.foot-links { display: flex; gap: 56px; }
+.foot-links h5 { margin: 0 0 10px; font-size: 13px; color: var(--ink); }
+.foot-links a { display: block; font-size: 14px; color: var(--text); margin-bottom: 7px; }
+.foot-links a:hover { color: var(--ink); }
 .stack { display: flex; flex-direction: column; gap: 12px; }
 .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .spacer { flex: 1; }
 .muted { color: var(--muted); }
 .small { font-size: 13px; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mono { font-family: var(--mono); font-size: .94em; }
 .hero { padding: 8px 0 4px; }
 .search input { flex: 1; min-width: 240px; }
 input, select { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; }
-.btn { display: inline-flex; align-items: center; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font: inherit; cursor: pointer; }
-.btn:hover { text-decoration: none; border-color: var(--accent); }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn { display: inline-flex; align-items: center; gap: .45em; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 999px; padding: 8px 16px; font: 600 14px/1.3 var(--sans); cursor: pointer; white-space: nowrap; transition: background .15s, box-shadow .15s, border-color .15s; }
+.btn:hover { text-decoration: none; border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.btn.primary { background: var(--primary); border-color: var(--primary); color: var(--accent-ink); }
+.btn.primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); box-shadow: var(--shadow-md); }
 .btn:disabled { opacity: 0.5; cursor: default; }
 .banner { padding: 10px 14px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: var(--radius); background: var(--panel); }
 .banner.bad { border-left-color: var(--bad); }
@@ -119,10 +159,7 @@ fieldset { border: 0; margin: 0; padding: 0; }
 /* (MapLibre makes its container position: relative: this fills the box all the same.) */
 .map > .map-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .map-note { position: absolute; left: 12px; bottom: 12px; right: 12px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
-.split { display: grid; grid-template-columns: minmax(320px, 440px) 1fr; height: calc(100vh - 57px); }
-.split-side { overflow-y: auto; padding: 20px 16px 32px; border-right: 1px solid var(--line); }
-.split-map { height: 100%; }
-.map-page { position: relative; height: calc(100vh - 57px); }
+.map-page { position: relative; flex: 1; min-height: 360px; }
 .map-full { position: absolute; inset: 0; }
 .map-panel { position: absolute; top: 12px; left: 12px; width: min(340px, calc(100% - 24px)); max-height: calc(100% - 24px); overflow-y: auto; padding: 14px; background: color-mix(in srgb, var(--panel) 94%, transparent); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 4px 18px rgb(0 0 0 / 0.08); }
 .maplibregl-ctrl-group { background: var(--panel) !important; border: 1px solid var(--line); box-shadow: none !important; }
@@ -137,11 +174,12 @@ fieldset { border: 0; margin: 0; padding: 0; }
 
 @media (max-width: 760px) {
   .where { grid-template-columns: 1fr; }
-  .brand-name { display: none; }
-  .split { grid-template-columns: 1fr; grid-template-rows: 45vh auto; height: auto; }
-  .split-map { order: -1; height: 45vh; }
-  .split-side { border-right: 0; overflow: visible; }
-  .map-page { height: calc(100vh - 100px); }
+  .brand-name, .brand-sep, .top-cta { display: none; }
+  .top-inner { padding: 10px 16px; gap: 10px; }
+  .top-search { order: 9; flex-basis: 100%; }
+  main { padding: 24px 16px 48px; }
+  .foot-inner { padding: 32px 16px 40px; }
+  .foot-links { gap: 40px; }
   .map-panel { top: auto; bottom: 12px; max-height: 45%; }
 }
 
@@ -190,3 +228,21 @@ fieldset { border: 0; margin: 0; padding: 0; }
 .close-x { flex: none; width: 28px; height: 28px; margin: -4px -6px 0 0; border: 0; border-radius: 6px; background: none; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; }
 .close-x:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 8%, transparent); }
 .close-x:focus-visible { outline: 2px solid var(--accent); }
+
+/* The tour (Tour.tsx): the map filling its frame, the system it's at in a card at the bottom left. */
+.tour { position: fixed; inset: 0; cursor: pointer; background: var(--bg); }
+.tour .maplibregl-ctrl-attrib { font-size: 10px; }
+.tour-card {
+  position: absolute; left: 16px; bottom: 16px; max-width: calc(100% - 32px);
+  display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 2px 10px;
+  padding: 10px 16px 11px 14px; border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--line); box-shadow: 0 8px 24px -8px rgb(0 0 0 / 0.35);
+  color: var(--ink); animation: tour-in .5s ease both;
+}
+.tour-card:hover { text-decoration: none; border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+.tour-card .dot { width: 10px; height: 10px; box-shadow: 0 0 0 3px rgb(255 255 255 / 0.12); }
+.tour-name { font-weight: 650; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tour-meta { grid-column: 2; font: 500 12px var(--mono); color: var(--muted); }
+@keyframes tour-in { from { opacity: 0; transform: translateY(8px); } }
+@media (prefers-reduced-motion: reduce) { .tour-card { animation: none; } }

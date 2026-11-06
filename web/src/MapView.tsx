@@ -50,7 +50,7 @@ function addLayers(map: MlMap, theme: "light" | "dark") {
   map.addLayer({
     id: "counties-fill", type: "fill", source: "counties",
     paint: {
-      "fill-color": dark ? "#5c9bff" : "#2f7ff5",
+      "fill-color": dark ? "#3fb6ff" : "#0a7bd6",
       "fill-opacity": ["interpolate", ["linear"], ["zoom"], 3, ["case", [">", ["coalesce", ["feature-state", "n"], 0], 0], ["min", 0.5, ["+", 0.12, ["*", 0.08, ["feature-state", "n"]]]], 0], 9, ["case", [">", ["coalesce", ["feature-state", "n"], 0], 0], 0.06, 0]],
     },
   });
@@ -81,7 +81,7 @@ function addLayers(map: MlMap, theme: "light" | "dark") {
       "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 2.5, 8, 4.5, 12, 6],
       "circle-color": typeColor as never,
       "circle-opacity": ["case", ["get", "stale"], 0.45, 0.95],
-      "circle-stroke-color": dark ? "#15181c" : "#ffffff",
+      "circle-stroke-color": dark ? "#0b1220" : "#ffffff",
       "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 3, 0.5, 8, 1.5],
     },
   });
@@ -91,12 +91,12 @@ function addLayers(map: MlMap, theme: "light" | "dark") {
     paint: {
       "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 5, 8, 7.5, 12, 9],
       "circle-color": typeColor as never,
-      "circle-stroke-color": dark ? "#e8ebef" : "#16191d",
+      "circle-stroke-color": dark ? "#f2f6fb" : "#0b1a2e",
       "circle-stroke-width": 2,
     },
   });
-  map.addLayer({ id: "me-halo", type: "circle", source: "me", paint: { "circle-radius": 11, "circle-color": dark ? "#e8ebef" : "#16191d", "circle-opacity": 0.15 } });
-  map.addLayer({ id: "me", type: "circle", source: "me", paint: { "circle-radius": 5, "circle-color": dark ? "#e8ebef" : "#16191d", "circle-stroke-color": dark ? "#15181c" : "#ffffff", "circle-stroke-width": 2 } });
+  map.addLayer({ id: "me-halo", type: "circle", source: "me", paint: { "circle-radius": 11, "circle-color": dark ? "#f2f6fb" : "#0b1a2e", "circle-opacity": 0.15 } });
+  map.addLayer({ id: "me", type: "circle", source: "me", paint: { "circle-radius": 5, "circle-color": dark ? "#f2f6fb" : "#0b1a2e", "circle-stroke-color": dark ? "#0b1220" : "#ffffff", "circle-stroke-width": 2 } });
 }
 
 export function MapView(props: {
@@ -110,6 +110,10 @@ export function MapView(props: {
   selectedLicense?: string | null;
   /** Offered at a click on nothing (and at a right click or long press): "Set my location here". */
   pointAction?: { label: string; run: (at: [number, number]) => void };
+  /** False: the view moves only as it's told (the tour), not by dragging, scrolling or keys. */
+  interactive?: boolean;
+  /** The map, once it's made: for a page that moves it itself (the tour). */
+  onMap?: (m: MlMap) => void;
   className?: string;
   label: string;
 }) {
@@ -162,13 +166,15 @@ export function MapView(props: {
       const wide = el.current.clientWidth > 760;
       const m = new ml.Map({
         container: el.current, style: basemapStyle(effective), attributionControl: { compact: true }, dragRotate: false, pitchWithRotate: false,
+        interactive: props.interactive ?? true,
         ...(f
           ? { bounds: [[f[0], f[1]], [f[2], f[3]]] as [[number, number], [number, number]], fitBoundsOptions: { padding: { top: 30, bottom: wide ? 30 : el.current.clientHeight * 0.45, left: wide ? 390 : 20, right: 30 } } }
           : { center: [props.view.center[1], props.view.center[0]] as [number, number], zoom: props.view.zoom }),
       });
-      m.addControl(new ml.NavigationControl({ showCompass: false }), "top-right");
+      if (props.interactive !== false) m.addControl(new ml.NavigationControl({ showCompass: false }), "top-right");
       m.touchZoomRotate.disableRotation();
       map.current = m;
+      cb.current.onMap?.(m);
       m.on("style.load", () => {
         addLayers(m, document.documentElement.dataset.theme === "dark" || (!document.documentElement.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light");
         ready.current = true;

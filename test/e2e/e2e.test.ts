@@ -94,7 +94,7 @@ describe("the website", () => {
   });
 
   test("the app's own routes get the app; /directory goes to /directory/", async () => {
-    for (const p of ["/directory/systems/sys_00000000000", "/directory/systems/sys_00000000000/talkgroups", "/directory/changesets/cs_00000000000", "/directory/?at=38.9,-77.03"]) {
+    for (const p of ["/directory/systems/sys_00000000000", "/directory/systems/sys_00000000000/talkgroups", "/directory/changesets/cs_00000000000", "/directory/?at=38.9,-77.03", "/directory/embed/tour?theme=dark"]) {
       // Served at the deep link itself: a redirect would lose the path.
       const r = await fetch(`${BASE}${p}`, { redirect: "manual" });
       assert.equal(r.status, 200, p);
@@ -109,7 +109,8 @@ describe("the website", () => {
     const r = await fetch(`${BASE}/`);
     assert.equal(r.status, 200);
     const html = await r.text();
-    assert.doesNotMatch(html, /Systems directory/);
+    // (It names the directory and shows its map, but isn't this app.)
+    assert.doesNotMatch(html, /<div id="root">/);
     assert.match(html, /Trunk Recorder/);
   });
 });

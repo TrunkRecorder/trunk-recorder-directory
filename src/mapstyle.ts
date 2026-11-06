@@ -17,20 +17,21 @@ const KEEP = new Set([
   "water_label_ocean", "water_label_lakes", "places_region", "places_locality", "places_country",
 ]);
 
+// (Cool greys and the night blue of trunkrecorder.pro's pages, so the map sits in them.)
 const LIGHT: Flavor = {
   ...namedFlavor("light"),
-  background: "#f4f3f0", earth: "#f4f3f0", water: "#cfdeea",
-  boundaries: "#b9bcc4",
-  highway: "#ffffff", highway_casing_early: "#d9d5cd", major: "#fbfaf8", major_casing_early: "#e3e0da",
-  city_label: "#55595f", city_label_halo: "#f4f3f0", state_label: "#a3a7ae", state_label_halo: "#f4f3f0", country_label: "#9a9ea6", ocean_label: "#7d97b0",
+  background: "#f3f6fa", earth: "#f3f6fa", water: "#cfe0ef",
+  boundaries: "#b4bfcd",
+  highway: "#ffffff", highway_casing_early: "#d5dde8", major: "#fbfcfe", major_casing_early: "#e3e8ef",
+  city_label: "#4b5b70", city_label_halo: "#f3f6fa", state_label: "#9aa8ba", state_label_halo: "#f3f6fa", country_label: "#93a1b4", ocean_label: "#6f8fae",
 };
 
 const DARK: Flavor = {
   ...namedFlavor("dark"),
-  background: "#15181c", earth: "#1b1e22", water: "#202a33",
-  boundaries: "#3e4550",
-  highway: "#363b42", highway_casing_early: "#15181c", major: "#2b2f35", major_casing_early: "#15181c",
-  city_label: "#9aa1aa", city_label_halo: "#15181c", state_label: "#5a616b", state_label_halo: "#15181c", country_label: "#626a75", ocean_label: "#4f6273",
+  background: "#0b1220", earth: "#111a2a", water: "#0c1d33",
+  boundaries: "#2f3e59",
+  highway: "#26344d", highway_casing_early: "#0b1220", major: "#1c2840", major_casing_early: "#0b1220",
+  city_label: "#8fa0b8", city_label_halo: "#0b1220", state_label: "#4f6280", state_label_halo: "#0b1220", country_label: "#5a6c88", ocean_label: "#40597a",
 };
 
 /** A layer without its icons (there's no sprite sheet: town names stand alone). */
